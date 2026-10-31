@@ -1,0 +1,18 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model WebhookEvent {
+  id         String   @id @default(cuid())
+  provider   String
+  headers    Json
+  rawBody    String
+  receivedAt DateTime @default(now())
+
+  @@index([provider, receivedAt])
+}

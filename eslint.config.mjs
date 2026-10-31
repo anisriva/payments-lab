@@ -20,6 +20,19 @@ const eslintConfig = [
       "next-env.d.ts",
     ],
   },
+  {
+    files: ['src/lib/payments/core/**/*.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          { group: ['next', 'next/*', '@prisma/*', '@/*'],
+            message: 'payments/core must stay framework-free.' },
+          { regex: '(^|/)(db|generated|services)(/|$)',
+            message: 'payments/core must not reach into db, generated or services.' },
+        ],
+      }],
+    },
+  },
 ];
 
 export default eslintConfig;
