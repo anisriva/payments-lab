@@ -1,5 +1,10 @@
 @baseUrl = http://localhost:3000
+# Fill from: SELECT id FROM provider_events ORDER BY received_at DESC LIMIT 1;
+@eventId = 00000000-0000-0000-0000-000000000000
 
-### 200 — reprocess an event row (fill id from: SELECT id FROM provider_events ORDER BY "receivedAt" DESC LIMIT 1;)
-### MCP check: SELECT "processedAt", note, error FROM provider_events WHERE id = '<event-id>';
-POST {{baseUrl}}/api/platform/payments/events/<event-id>/reprocess
+### 200 — reprocess an event row
+# MCP check: SELECT processed_at, note, error FROM provider_events ORDER BY received_at DESC LIMIT 1;
+POST {{baseUrl}}/api/platform/payments/events/{{eventId}}/reprocess
+
+### 404 — random UUID event id (ProviderEventNotFoundError)
+POST {{baseUrl}}/api/platform/payments/events/00000000-0000-4000-8000-000000000000/reprocess

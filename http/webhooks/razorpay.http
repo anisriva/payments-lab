@@ -1,6 +1,7 @@
 @baseUrl = http://localhost:3000
 
-### 400 — fake signature (no valid HMAC). MCP check: SELECT count(*) FROM provider_events — must NOT increase.
+### 400 — fake signature (no valid HMAC)
+# MCP check: SELECT count(*) FROM provider_events; — must NOT increase.
 POST {{baseUrl}}/api/webhooks/razorpay
 Content-Type: application/json
 X-Razorpay-Signature: deadbeef
@@ -8,7 +9,8 @@ X-Razorpay-Event-Id: evt_fake_1
 
 {"event":"payment.captured","payload":{"payment":{"entity":{"id":"pay_x","order_id":"order_x"}}}}
 
-### 200 — unsigned body treated as validation failure (missing event id → PaymentValidationError → 200, never retryable)
+### 400 — missing signature header entirely (also InvalidPaymentSignatureError)
+# MCP check: SELECT count(*) FROM provider_events; — must NOT increase.
 POST {{baseUrl}}/api/webhooks/razorpay
 Content-Type: application/json
 
