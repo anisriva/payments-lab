@@ -1,7 +1,8 @@
 'use client';
 import { Button } from '@/components/ui/button';
 import { useCheckoutFlow } from '@/hooks/common/payments/use-checkout-flow';
-import { useStartPlatformSubscription, useConfirmPlatformSubscription } from '@/hooks/platform/payments/mutations';
+import { useStartPlatformSubscription } from '@/hooks/platform/payments/use-start-platform-subscription';
+import { useConfirmPlatformSubscription } from '@/hooks/platform/payments/use-confirm-platform-subscription';
 
 export function SubscribeButton({ gateway, payer, planPriceId }: { gateway: string; payer: string; planPriceId: string }) {
   const startSub = useStartPlatformSubscription();

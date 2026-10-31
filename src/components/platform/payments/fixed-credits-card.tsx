@@ -1,9 +1,11 @@
 'use client';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useCheckoutFlow } from '@/hooks/common/payments/use-checkout-flow';
-import { useStartCreditPurchase, useConfirmCreditPurchase } from '@/hooks/platform/payments/mutations';
+import { useStartCreditPurchase } from '@/hooks/platform/payments/use-start-credit-purchase';
+import { useConfirmCreditPurchase } from '@/hooks/platform/payments/use-confirm-credit-purchase';
 import { CREDIT_QUICK_PICKS, CREDIT_RATE_MINOR } from '@/lib/common/services/payments/payment-constants';
 import { formatMoney } from '@/lib/common/helpers/money';
 
@@ -14,22 +16,30 @@ export function FixedCreditsCard({ gateway, payer }: { gateway: string; payer: s
   const flow = useCheckoutFlow();
   return (
     <Card>
-      <CardHeader><CardTitle>One-time (fixed)</CardTitle></CardHeader>
+      <CardHeader>
+        <CardTitle>Quick purchase</CardTitle>
+        <CardDescription>Buy a preset credit pack at ₹{(CREDIT_RATE_MINOR / 100).toFixed(2)}/credit</CardDescription>
+      </CardHeader>
       <CardContent className="space-y-3">
-        <div className="flex gap-2">
+        <ToggleGroup value={[String(credits)]} onValueChange={(v) => v.length > 0 && setCredits(Number(v[0]))}>
           {CREDIT_QUICK_PICKS.map((c) => (
-            <Button key={c} type="button" variant={c === credits ? 'default' : 'outline'} size="sm" onClick={() => setCredits(c)}>{c}</Button>
+            <ToggleGroupItem key={c} value={String(c)}>{c}</ToggleGroupItem>
           ))}
+        </ToggleGroup>
+        <div>
+          <p className="text-2xl font-semibold">{formatMoney(credits * CREDIT_RATE_MINOR, 'INR')}</p>
+          <p className="text-sm text-muted-foreground">≈ {credits} credits</p>
         </div>
-        <p className="text-sm text-muted-foreground">{formatMoney(credits * CREDIT_RATE_MINOR, 'INR')}</p>
+      </CardContent>
+      <CardFooter>
         <Button disabled={start.isPending} onClick={() =>
           flow.run({
             start: () => start.mutateAsync({ gateway, payerCountry: payer, credits, kind: 'fixed' }),
             confirm: confirm.mutateAsync,
             recordUrl: (id) => `/api/platform/payments/credit-purchases/${id}`,
           })
-        }>Buy</Button>
-      </CardContent>
+        }>Buy credits</Button>
+      </CardFooter>
     </Card>
   );
 }

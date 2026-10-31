@@ -2,6 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { buttonVariants } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 export function LinkTabs({
@@ -13,24 +15,24 @@ export function LinkTabs({
 }) {
   const pathname = usePathname();
   return (
-    <nav className="flex gap-4 border-b">
+    <nav className="flex gap-1">
       {items.map((item) => {
         const active = matchPrefix ? pathname.startsWith(item.href) : pathname === item.href;
         if (item.disabled) {
           return (
-            <span key={item.href} className="px-2 py-2 text-sm text-muted-foreground">
-              {item.label} · soon
-            </span>
+            <Tooltip key={item.href}>
+              <TooltipTrigger render={<span className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }), 'text-muted-foreground')} />}>
+                {item.label} · soon
+              </TooltipTrigger>
+              <TooltipContent>Not implemented yet</TooltipContent>
+            </Tooltip>
           );
         }
         return (
           <Link
             key={item.href}
             href={item.href}
-            className={cn(
-              'px-2 py-2 text-sm border-b-2 -mb-px',
-              active ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground'
-            )}
+            className={cn(buttonVariants({ variant: active ? 'secondary' : 'ghost', size: 'sm' }))}
           >
             {item.label}
           </Link>
