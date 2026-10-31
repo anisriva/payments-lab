@@ -7,12 +7,287 @@ datasource db {
   provider = "postgresql"
 }
 
-model WebhookEvent {
-  id         String   @id @default(cuid())
-  provider   String
-  headers    Json
-  rawBody    String
-  receivedAt DateTime @default(now())
+enum PaymentProvider {
+  razorpay
+  dodo
+  stripe
+  paypal
+}
 
-  @@index([provider, receivedAt])
+enum PaymentEnvironment {
+  test
+  live
+}
+
+enum PaymentStatus {
+  pending
+  paid
+  failed
+}
+
+enum SubscriptionStatus {
+  pending
+  active
+  halted
+  cancelled
+  completed
+}
+
+enum BillingInterval {
+  monthly
+  yearly
+}
+
+enum CreditPurchaseKind {
+  fixed
+  custom
+}
+
+enum PaymentKind {
+  one_time
+  subscription_initial
+  subscription_renewal
+  refund
+}
+
+enum ProviderProductRefType {
+  plan_price
+  offering
+}
+
+enum OfferingPriceType {
+  fixed
+  custom
+  recurring
+}
+
+// ───────────── Platform (Folio gets paid) ─────────────
+
+model PlatformPlanPrice {
+  id           String          @id @default(uuid())
+  planKey      String          @map("plan_key") @db.VarChar(50)
+  displayName  String          @map("display_name") @db.VarChar(100)
+  interval     BillingInterval
+  amountMinor  Int             @map("amount_minor")
+  currencyCode String          @map("currency_code") @db.Char(3)
+  isActive     Boolean         @default(true) @map("is_active")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+
+  subscriptions Subscription[]
+
+  @@unique([planKey, interval, currencyCode])
+  @@map("platform_plan_prices")
+}
+
+model Subscription {
+  id                     String             @id @default(uuid())
+  platformPlanPriceId    String             @map("platform_plan_price_id")
+  provider               PaymentProvider
+  environment            PaymentEnvironment
+  providerSubscriptionId String?            @unique @map("provider_subscription_id")
+  status                 SubscriptionStatus @default(pending)
+  currentPeriodStart     DateTime?          @map("current_period_start")
+  currentPeriodEnd       DateTime?          @map("current_period_end")
+  cancelAtCycleEnd       Boolean            @default(false) @map("cancel_at_cycle_end")
+  canceledAt             DateTime?          @map("canceled_at")
+  failureReason          String?            @map("failure_reason")
+  createdAt              DateTime           @default(now()) @map("created_at")
+  updatedAt              DateTime           @updatedAt @map("updated_at")
+
+  platformPlanPrice PlatformPlanPrice @relation(fields: [platformPlanPriceId], references: [id], onDelete: Restrict)
+  payments          Payment[]
+
+  @@index([provider, createdAt])
+  @@map("subscriptions")
+}
+
+model AiCreditPurchase {
+  id                String             @id @default(uuid())
+  kind              CreditPurchaseKind
+  credits           Int
+  amountMinor       Int                @map("amount_minor")
+  currencyCode      String             @map("currency_code") @db.Char(3)
+  provider          PaymentProvider
+  environment       PaymentEnvironment
+  providerOrderId   String?            @unique @map("provider_order_id")
+  providerPaymentId String?            @map("provider_payment_id")
+  status            PaymentStatus      @default(pending)
+  failureReason     String?            @map("failure_reason")
+  paidAt            DateTime?          @map("paid_at")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+
+  payments Payment[]
+
+  @@index([provider, createdAt])
+  @@map("ai_credit_purchases")
+}
+
+// Platform revenue record: one row per money movement.
+model Payment {
+  id                 String             @id @default(uuid())
+  kind               PaymentKind
+  provider           PaymentProvider
+  environment        PaymentEnvironment
+  providerPaymentId  String             @unique @map("provider_payment_id")
+  amountMinor        Int                @map("amount_minor")
+  currencyCode       String             @map("currency_code") @db.Char(3)
+  aiCreditPurchaseId String?            @map("ai_credit_purchase_id")
+  subscriptionId     String?            @map("subscription_id")
+  createdAt          DateTime           @default(now()) @map("created_at")
+
+  aiCreditPurchase AiCreditPurchase? @relation(fields: [aiCreditPurchaseId], references: [id], onDelete: Restrict)
+  subscription     Subscription?     @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+
+  @@index([provider, createdAt])
+  @@map("payments")
+}
+
+// Maps our price/offering to the provider's object (Razorpay plan_xxx).
+// scope = 'platform' OR a PaymentConnection.id
+model ProviderProduct {
+  id          String                 @id @default(uuid())
+  scope       String                 @db.VarChar(64)
+  provider    PaymentProvider
+  environment PaymentEnvironment
+  refType     ProviderProductRefType @map("ref_type")
+  refId       String                 @map("ref_id")
+  providerRef String                 @map("provider_ref")
+  createdAt   DateTime               @default(now()) @map("created_at")
+
+  @@unique([scope, provider, environment, refType, refId])
+  @@map("provider_products")
+}
+
+// ───────────── BYOP (creator gets paid) ─────────────
+
+// LAB-ONLY stub of Folio's Project.
+model Project {
+  id          String   @id @default(uuid())
+  name        String   @unique @db.VarChar(150)
+  countryCode String   @map("country_code") @db.Char(2)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  connections   PaymentConnection[]
+  offerings     ProjectOffering[]
+  orders        ProjectOrder[]
+  subscriptions ProjectSubscription[]
+
+  @@map("projects")
+}
+
+// The service ALWAYS sets `id` explicitly (it is the encryption AAD).
+model PaymentConnection {
+  id             String             @id @default(uuid())
+  projectId      String             @map("project_id")
+  provider       PaymentProvider
+  environment    PaymentEnvironment
+  credentialsEnc String             @map("credentials_enc") @db.Text
+  displayHint    String             @map("display_hint") @db.VarChar(64)
+  isEnabled      Boolean            @default(true) @map("is_enabled")
+  verifiedAt     DateTime?          @map("verified_at")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+
+  project       Project               @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  orders        ProjectOrder[]
+  subscriptions ProjectSubscription[]
+
+  @@unique([projectId, provider, environment])
+  @@map("payment_connections")
+}
+
+// LAB-ONLY stand-in for future module catalogs (Shop, Courses, Appointments).
+// amountMinor = fixed price | minimum for custom | recurring price.
+model ProjectOffering {
+  id           String            @id @default(uuid())
+  projectId    String            @map("project_id")
+  name         String            @db.VarChar(150)
+  priceType    OfferingPriceType @map("price_type")
+  amountMinor  Int               @map("amount_minor")
+  currencyCode String            @map("currency_code") @db.Char(3)
+  interval     BillingInterval?
+  isActive     Boolean           @default(true) @map("is_active")
+  createdAt    DateTime          @default(now()) @map("created_at")
+
+  project       Project               @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  orders        ProjectOrder[]
+  subscriptions ProjectSubscription[]
+
+  @@index([projectId])
+  @@map("project_offerings")
+}
+
+model ProjectOrder {
+  id                String             @id @default(uuid())
+  projectId         String             @map("project_id")
+  connectionId      String             @map("connection_id")
+  offeringId        String             @map("offering_id")
+  buyerEmail        String             @map("buyer_email") @db.VarChar(255)
+  amountMinor       Int                @map("amount_minor")
+  currencyCode      String             @map("currency_code") @db.Char(3)
+  provider          PaymentProvider
+  environment       PaymentEnvironment
+  providerOrderId   String?            @unique @map("provider_order_id")
+  providerPaymentId String?            @map("provider_payment_id")
+  status            PaymentStatus      @default(pending)
+  failureReason     String?            @map("failure_reason")
+  paidAt            DateTime?          @map("paid_at")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+
+  project    Project           @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  connection PaymentConnection @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+  offering   ProjectOffering   @relation(fields: [offeringId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, createdAt])
+  @@map("project_orders")
+}
+
+model ProjectSubscription {
+  id                     String             @id @default(uuid())
+  projectId              String             @map("project_id")
+  connectionId           String             @map("connection_id")
+  offeringId             String             @map("offering_id")
+  buyerEmail             String             @map("buyer_email") @db.VarChar(255)
+  provider               PaymentProvider
+  environment            PaymentEnvironment
+  providerSubscriptionId String?            @unique @map("provider_subscription_id")
+  status                 SubscriptionStatus @default(pending)
+  currentPeriodStart     DateTime?          @map("current_period_start")
+  currentPeriodEnd       DateTime?          @map("current_period_end")
+  cancelAtCycleEnd       Boolean            @default(false) @map("cancel_at_cycle_end")
+  canceledAt             DateTime?          @map("canceled_at")
+  failureReason          String?            @map("failure_reason")
+  createdAt              DateTime           @default(now()) @map("created_at")
+  updatedAt              DateTime           @updatedAt @map("updated_at")
+
+  project    Project           @relation(fields: [projectId], references: [id], onDelete: Restrict)
+  connection PaymentConnection @relation(fields: [connectionId], references: [id], onDelete: Restrict)
+  offering   ProjectOffering   @relation(fields: [offeringId], references: [id], onDelete: Restrict)
+
+  @@index([projectId, createdAt])
+  @@map("project_subscriptions")
+}
+
+// ───────────── Shared ─────────────
+
+// Verified webhook events only. scope = 'platform' OR a PaymentConnection.id.
+model ProviderEvent {
+  id              String          @id @default(uuid())
+  provider        PaymentProvider
+  scope           String          @db.VarChar(64)
+  providerEventId String          @map("provider_event_id")
+  eventType       String          @map("event_type") @db.VarChar(100)
+  headers         Json
+  rawBody         String          @map("raw_body") @db.Text
+  processedAt     DateTime?       @map("processed_at")
+  note            String?
+  error           String?
+  receivedAt      DateTime        @default(now()) @map("received_at")
+
+  @@unique([provider, scope, providerEventId])
+  @@index([receivedAt])
+  @@map("provider_events")
 }
