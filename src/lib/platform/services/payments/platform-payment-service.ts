@@ -20,7 +20,6 @@ import { getCapabilities, isProviderKey } from '@/lib/common/payments/core/facto
 import { selectProvider } from '@/lib/common/payments/core/selector';
 import { InvalidPaymentSignatureError, ProviderNotImplementedError } from '@/lib/common/payments/core/errors';
 import type { CheckoutInstruction, CheckoutMode, NormalizedEvent, ProviderKey } from '@/lib/common/payments/core/types';
-import type { PaginationResult } from '@/types/common/pagination';
 import type { PaymentProvider } from '@/lib/common/payments/core/provider';
 import {
   CreditPurchaseNotFoundError,
