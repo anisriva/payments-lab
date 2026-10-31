@@ -11,7 +11,6 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { SSRPagination } from '@/components/common/navigation/pagination';
 import { StatusBadge } from '@/components/common/payments/status-badge';
@@ -37,10 +36,18 @@ export default async function PlatformGatewayPage({
   const ppage = parsePositivePage(query.ppage);
   const spage = parsePositivePage(query.spage);
   const paypage = parsePositivePage(query.paypage);
+  const activity = parseEnumParam(query.activity, ['purchases','subscriptions','payments'] as const, 'purchases');
 
   const providers = listProviders('platform');
   if (gateway !== 'auto' && !providers.some((p) => p.key === gateway)) notFound();
   const caps = providers.find((p) => p.key === gateway);
+
+  const tabHref = (a: string) => {
+    const q = new URLSearchParams();
+    Object.entries(query).forEach(([k, v]) => { if (typeof v === 'string') q.set(k, v); });
+    q.set('activity', a);
+    return `/platform/${gateway}?${q.toString()}`;
+  };
 
   const service = new PlatformPaymentService(prisma);
   const preview = gateway === 'auto' ? await service.getSelectionPreview(payer) : null;
@@ -124,13 +131,16 @@ export default async function PlatformGatewayPage({
               <CardDescription>Purchases, subscriptions and recorded payments</CardDescription>
             </CardHeader>
             <CardContent>
-              <Tabs defaultValue="purchases">
-                <TabsList>
-                  <TabsTrigger value="purchases">Purchases</TabsTrigger>
-                  <TabsTrigger value="subscriptions">Subscriptions</TabsTrigger>
-                  <TabsTrigger value="payments">Payments</TabsTrigger>
-                </TabsList>
-                <TabsContent value="purchases">
+              <nav className="flex gap-1">
+                {(['purchases','subscriptions','payments'] as const).map((a) => (
+                  <Link key={a} href={tabHref(a)}
+                    className={cn(buttonVariants({ variant: activity === a ? 'secondary' : 'ghost', size: 'sm' }))}>
+                    {a === 'purchases' ? 'Purchases' : a === 'subscriptions' ? 'Subscriptions' : 'Payments'}
+                  </Link>
+                ))}
+              </nav>
+
+              {activity === 'purchases' && (<>
                   <Table>
                     <TableHeader><TableRow><TableHead>Kind</TableHead><TableHead>Credits</TableHead><TableHead>Amount</TableHead><TableHead>Status</TableHead><TableHead>Order ref</TableHead><TableHead>Created</TableHead><TableHead /></TableRow></TableHeader>
                     <TableBody>
@@ -148,8 +158,8 @@ export default async function PlatformGatewayPage({
                     </TableBody>
                   </Table>
                   <SSRPagination pathname={`/platform/${gateway}`} searchParams={query} currentPage={purchases.meta.page} totalPages={purchases.meta.totalPages} pageParam="ppage" />
-                </TabsContent>
-                <TabsContent value="subscriptions">
+              </>)}
+              {activity === 'subscriptions' && (<>
                   <Table>
                     <TableHeader><TableRow><TableHead>Plan</TableHead><TableHead>Status</TableHead><TableHead>Period end</TableHead><TableHead>Sub ref</TableHead><TableHead /></TableRow></TableHeader>
                     <TableBody>
@@ -166,8 +176,8 @@ export default async function PlatformGatewayPage({
                     </TableBody>
                   </Table>
                   <SSRPagination pathname={`/platform/${gateway}`} searchParams={query} currentPage={subscriptions.meta.page} totalPages={subscriptions.meta.totalPages} pageParam="spage" />
-                </TabsContent>
-                <TabsContent value="payments">
+              </>)}
+              {activity === 'payments' && (<>
                   <Table>
                     <TableHeader><TableRow><TableHead>Kind</TableHead><TableHead>Amount</TableHead><TableHead>Payment ref</TableHead><TableHead>Created</TableHead></TableRow></TableHeader>
                     <TableBody>
@@ -183,8 +193,7 @@ export default async function PlatformGatewayPage({
                     </TableBody>
                   </Table>
                   <SSRPagination pathname={`/platform/${gateway}`} searchParams={query} currentPage={payments.meta.page} totalPages={payments.meta.totalPages} pageParam="paypage" />
-                </TabsContent>
-              </Tabs>
+              </>)}
             </CardContent>
           </Card>
         </>
