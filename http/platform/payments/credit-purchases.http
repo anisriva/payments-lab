@@ -1,0 +1,29 @@
+@baseUrl = http://localhost:3000
+
+### 201 — start a fixed credit purchase (check instruction.options.order_id starts with "order_")
+### MCP check: SELECT status, "providerOrderId" FROM ai_credit_purchases ORDER BY "createdAt" DESC LIMIT 1;
+# @name startPurchase
+POST {{baseUrl}}/api/platform/payments/credit-purchases
+Content-Type: application/json
+
+{"gateway":"razorpay","payerCountry":"IN","credits":500,"kind":"fixed"}
+
+### 200 — sync the purchase (check status field; pending until checkout completes)
+### MCP check: SELECT status, "providerPaymentId", "paidAt" FROM ai_credit_purchases WHERE id = '{{startPurchase.response.body.$.data.recordId}}';
+GET {{baseUrl}}/api/platform/payments/credit-purchases/{{startPurchase.response.body.$.data.recordId}}
+
+### 400 — auto gateway with US payer has no provider (check selector reason in error message)
+POST {{baseUrl}}/api/platform/payments/credit-purchases
+Content-Type: application/json
+
+{"gateway":"auto","payerCountry":"US","credits":500,"kind":"fixed"}
+
+### 400 — invalid fixed credit amount (check InvalidCreditAmountError message)
+POST {{baseUrl}}/api/platform/payments/credit-purchases
+Content-Type: application/json
+
+{"gateway":"razorpay","payerCountry":"IN","credits":123,"kind":"fixed"}
+
+### 200 — refresh the purchase status from Razorpay
+### MCP check: SELECT status FROM ai_credit_purchases WHERE id = '{{startPurchase.response.body.$.data.recordId}}';
+POST {{baseUrl}}/api/platform/payments/credit-purchases/{{startPurchase.response.body.$.data.recordId}}/refresh

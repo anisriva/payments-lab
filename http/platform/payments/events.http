@@ -1,0 +1,5 @@
+@baseUrl = http://localhost:3000
+
+### 200 — reprocess an event row (fill id from: SELECT id FROM provider_events ORDER BY "receivedAt" DESC LIMIT 1;)
+### MCP check: SELECT "processedAt", note, error FROM provider_events WHERE id = '<event-id>';
+POST {{baseUrl}}/api/platform/payments/events/<event-id>/reprocess

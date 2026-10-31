@@ -1,0 +1,23 @@
+@baseUrl = http://localhost:3000
+
+### 201 — start a subscription (fill planPriceId from: SELECT id FROM platform_plan_prices WHERE "planKey"='premium';)
+### MCP check: SELECT status, "providerSubscriptionId" FROM subscriptions ORDER BY "createdAt" DESC LIMIT 1;
+# @name startSubscription
+POST {{baseUrl}}/api/platform/payments/subscriptions
+Content-Type: application/json
+
+{"gateway":"razorpay","payerCountry":"IN","planPriceId":"<plan-price-id>"}
+
+### 200 — sync the subscription
+### MCP check: SELECT status FROM subscriptions WHERE id = '{{startSubscription.response.body.$.data.recordId}}';
+GET {{baseUrl}}/api/platform/payments/subscriptions/{{startSubscription.response.body.$.data.recordId}}
+
+### 200 — refresh subscription status from Razorpay
+POST {{baseUrl}}/api/platform/payments/subscriptions/{{startSubscription.response.body.$.data.recordId}}/refresh
+
+### 200 — cancel at cycle end
+### MCP check: SELECT status, "cancelAtCycleEnd", "canceledAt" FROM subscriptions WHERE id = '{{startSubscription.response.body.$.data.recordId}}';
+POST {{baseUrl}}/api/platform/payments/subscriptions/{{startSubscription.response.body.$.data.recordId}}/cancel
+Content-Type: application/json
+
+{"atCycleEnd":true}

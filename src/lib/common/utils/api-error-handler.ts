@@ -18,6 +18,11 @@ const ERROR_STATUS_BY_NAME: Record<string, number> = {
   ThemeValidationError: 400,
   InvalidPresetError: 400,
   CannotRemoveOwnerError: 400,
+  PaymentValidationError: 400,
+  ProviderNotImplementedError: 400,
+  InvalidPaymentSignatureError: 400,
+  InvalidCreditAmountError: 400,
+  NoPaymentProviderAvailableError: 400,
 
   // 401 — unauthenticated
   UnauthenticatedError: 401,
@@ -46,6 +51,10 @@ const ERROR_STATUS_BY_NAME: Record<string, number> = {
   BlogTagNotFoundError: 404,
   BlogCommentNotFoundError: 404,
   NotFoundException: 404,
+  ProviderEventNotFoundError: 404,
+  PlanPriceNotFoundError: 404,
+  CreditPurchaseNotFoundError: 404,
+  PlatformSubscriptionNotFoundError: 404,
 
   // 409 — conflict / duplicate
   ResourceExistsError: 409,
@@ -57,6 +66,10 @@ const ERROR_STATUS_BY_NAME: Record<string, number> = {
   MemberAlreadyExistsError: 409,
   NewOwnerNotMemberError: 409,
   NoImportToUndoError: 409,
+  PaymentNotStartedError: 409,
+
+  // 502 — upstream provider failure
+  PaymentProviderError: 502,
 
   // 422 — unprocessable input (client shows a typed problem card via `code`)
   CvImportError: 422,
