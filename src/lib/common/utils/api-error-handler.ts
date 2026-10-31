@@ -23,6 +23,11 @@ const ERROR_STATUS_BY_NAME: Record<string, number> = {
   InvalidPaymentSignatureError: 400,
   InvalidCreditAmountError: 400,
   NoPaymentProviderAvailableError: 400,
+  GatewayCredentialsRejectedError: 400,
+  GatewayCountryNotSupportedError: 400,
+  InvalidOfferingError: 400,
+  OfferingNotPurchasableError: 400,
+  AmountBelowMinimumError: 400,
 
   // 401 — unauthenticated
   UnauthenticatedError: 401,
@@ -55,6 +60,10 @@ const ERROR_STATUS_BY_NAME: Record<string, number> = {
   PlanPriceNotFoundError: 404,
   CreditPurchaseNotFoundError: 404,
   PlatformSubscriptionNotFoundError: 404,
+  PaymentConnectionNotFoundError: 404,
+  OfferingNotFoundError: 404,
+  ProjectOrderNotFoundError: 404,
+  ProjectSubscriptionNotFoundError: 404,
 
   // 409 — conflict / duplicate
   ResourceExistsError: 409,
@@ -67,6 +76,8 @@ const ERROR_STATUS_BY_NAME: Record<string, number> = {
   NewOwnerNotMemberError: 409,
   NoImportToUndoError: 409,
   PaymentNotStartedError: 409,
+  GatewayNotConnectedError: 409,
+  PaymentConnectionDisabledError: 409,
 
   // 502 — upstream provider failure
   PaymentProviderError: 502,

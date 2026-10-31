@@ -2,9 +2,11 @@ import type { PrismaClient } from '@/generated/prisma';
 import { ProviderEventDAO } from '@/lib/common/dao/payments/provider-event-dao';
 import { UniqueConstraintException } from '@/lib/common/exceptions';
 import { getPlatformProvider } from './payment-config';
-import { PaymentValidationError } from '@/lib/common/payments/core/errors';
 import type { ProviderKey } from '@/lib/common/payments/core/types';
 import { PlatformPaymentService } from '@/lib/platform/services/payments/platform-payment-service';
+import { ProjectPaymentService } from '@/lib/project/services/payments/project-payment-service';
+import { PaymentConnectionService } from '@/lib/project/services/payments/payment-connection-service';
+import { PaymentConnectionNotFoundError } from '@/lib/project/services/payments/errors';
 import { ProviderEventNotFoundError } from './errors';
 import type { PaginationInput } from '@/types/common/pagination';
 import type { PaymentProvider } from '@/generated/prisma';
@@ -12,10 +14,14 @@ import type { PaymentProvider } from '@/generated/prisma';
 export class PaymentWebhookService {
   private providerEventDAO: ProviderEventDAO;
   private platformPaymentService: PlatformPaymentService;
+  private projectPaymentService: ProjectPaymentService;
+  private paymentConnectionService: PaymentConnectionService;
 
   constructor(private readonly prisma: PrismaClient) {
     this.providerEventDAO = new ProviderEventDAO(prisma);
     this.platformPaymentService = new PlatformPaymentService(prisma);
+    this.projectPaymentService = new ProjectPaymentService(prisma);
+    this.paymentConnectionService = new PaymentConnectionService(prisma);
   }
 
   async ingest(input: {
@@ -27,10 +33,14 @@ export class PaymentWebhookService {
     const { provider, connectionId, rawBody, headers } = input;
 
     // 1. Build the adapter
+    let adapter;
     if (connectionId) {
-      throw new PaymentValidationError('BYOP webhooks not enabled yet');
+      const result = await this.paymentConnectionService.getAdapter(connectionId, { requireEnabled: false });
+      if (result.connection.provider !== provider) throw new PaymentConnectionNotFoundError(connectionId);
+      adapter = result.adapter;
+    } else {
+      adapter = getPlatformProvider(provider);
     }
-    const adapter = getPlatformProvider(provider);
 
     // 2. Verify + normalise — no DB access before this line for platform scope
     const event = adapter.parseWebhook(rawBody, headers);
@@ -67,7 +77,9 @@ export class PaymentWebhookService {
 
     // 6. Apply
     try {
-      const note = await this.platformPaymentService.applyEvent(event);
+      const note = connectionId
+        ? await this.projectPaymentService.applyEvent(event, connectionId)
+        : await this.platformPaymentService.applyEvent(event);
       await this.providerEventDAO.markProcessed(row.id, note);
       return 'processed';
     } catch (e) {
@@ -79,10 +91,18 @@ export class PaymentWebhookService {
   async reprocess(eventId: string): Promise<void> {
     const row = await this.providerEventDAO.findById(eventId);
     if (!row) throw new ProviderEventNotFoundError(eventId);
-    const adapter = getPlatformProvider(row.provider);
+    let adapter;
+    if (row.scope !== 'platform') {
+      const result = await this.paymentConnectionService.getAdapter(row.scope, { requireEnabled: false });
+      adapter = result.adapter;
+    } else {
+      adapter = getPlatformProvider(row.provider);
+    }
     const event = adapter.parseWebhook(row.rawBody, row.headers as Record<string, string>);
     try {
-      const note = await this.platformPaymentService.applyEvent(event);
+      const note = row.scope !== 'platform'
+        ? await this.projectPaymentService.applyEvent(event, row.scope)
+        : await this.platformPaymentService.applyEvent(event);
       await this.providerEventDAO.markProcessed(row.id, note);
     } catch (e) {
       await this.providerEventDAO.markFailed(row.id, e instanceof Error ? e.message : 'Unknown error');
