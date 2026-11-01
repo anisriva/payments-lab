@@ -22,6 +22,15 @@ export class InvalidOfferingError extends Error {
 export class OfferingNotPurchasableError extends Error {
   constructor(name: string) { super(`Offering is not purchasable: ${name}`); this.name = 'OfferingNotPurchasableError'; }
 }
+export class OfferingInUseError extends Error {
+  constructor(id: string) { super(`Offering is in use and cannot be deleted: ${id}`); this.name = 'OfferingInUseError'; }
+}
+export class InvalidCredentialsInputError extends Error {
+  constructor(message: string) { super(message); this.name = 'InvalidCredentialsInputError'; }
+}
+export class CurrencyNotSupportedError extends Error {
+  constructor(label: string, currency: string) { super(`${label} does not support ${currency}`); this.name = 'CurrencyNotSupportedError'; }
+}
 export class AmountBelowMinimumError extends Error {
   constructor(minimumMinor: number) { super(`Amount is below the minimum of ${minimumMinor}`); this.name = 'AmountBelowMinimumError'; }
 }

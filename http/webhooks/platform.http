@@ -1,0 +1,27 @@
+@baseUrl = http://localhost:3000
+
+### 404 — unknown provider
+POST {{baseUrl}}/api/webhooks/platform/foo
+Content-Type: application/json
+
+{}
+
+### 404 — not implemented
+POST {{baseUrl}}/api/webhooks/platform/dodo
+Content-Type: application/json
+
+{}
+
+### 404 — stripe is not a platform provider
+POST {{baseUrl}}/api/webhooks/platform/stripe
+Content-Type: application/json
+
+{}
+
+### 400 — razorpay, fake signature
+POST {{baseUrl}}/api/webhooks/platform/razorpay
+Content-Type: application/json
+X-Razorpay-Signature: deadbeef
+X-Razorpay-Event-Id: evt_fake
+
+{"event":"payment.captured","payload":{}}

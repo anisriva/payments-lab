@@ -20,6 +20,10 @@ Content-Type: application/json
 # MCP check: SELECT status, provider_payment_id, paid_at FROM ai_credit_purchases ORDER BY created_at DESC LIMIT 1;
 GET {{baseUrl}}/api/platform/payments/credit-purchases/{{startPurchase.response.body.$.data.recordId}}
 
+### 200 — list all credit purchases
+# MCP check: SELECT status, provider_order_id, amount_minor FROM ai_credit_purchases ORDER BY created_at DESC LIMIT 10;
+GET {{baseUrl}}/api/platform/payments/credit-purchases
+
 ### 400 — custom amount below minimum (InvalidCreditAmountError message)
 POST {{baseUrl}}/api/platform/payments/credit-purchases
 Content-Type: application/json
@@ -59,3 +63,23 @@ Content-Type: application/json
 ### 200 — refresh the purchase status from Razorpay
 # MCP check: SELECT status FROM ai_credit_purchases ORDER BY created_at DESC LIMIT 1;
 POST {{baseUrl}}/api/platform/payments/credit-purchases/{{startPurchase.response.body.$.data.recordId}}/refresh
+
+### 400 — US payer before the Catalog is widened (acceptance 6)
+# Razorpay payerCountries = ['IN'] → selector rejects at the payer check
+# (payer check runs before the currency check): "razorpay: does not accept payers from US".
+POST {{baseUrl}}/api/platform/payments/credit-purchases
+Content-Type: application/json
+
+{"gateway":"razorpay","payerCountry":"US","credits":500,"kind":"fixed"}
+
+### 201 or 422 — US payer AFTER provider-settings PATCH (acceptance 7 — the experiment)
+# First run provider-settings.http "widen Razorpay rules" (payerCountries IN+US,
+# currencies INR+USD). The selector now passes the payer AND currency checks, so the
+# request reaches Razorpay — then either:
+#   201 (Razorpay created a USD order), or
+#   422 PaymentRequestRejectedError with Razorpay's message; purchase row is failed with failure_reason.
+# MCP check: SELECT status, failure_reason, currency_code FROM ai_credit_purchases ORDER BY created_at DESC LIMIT 1;
+POST {{baseUrl}}/api/platform/payments/credit-purchases
+Content-Type: application/json
+
+{"gateway":"razorpay","payerCountry":"US","credits":500,"kind":"fixed"}

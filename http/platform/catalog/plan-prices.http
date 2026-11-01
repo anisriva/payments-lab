@@ -1,0 +1,45 @@
+@baseUrl = http://localhost:3000
+
+### 201 — create plan price (acceptance 1)
+# MCP check: SELECT ref_type, ref_id, provider_ref FROM provider_products WHERE ref_type = 'plan_price' ORDER BY created_at DESC LIMIT 1;
+# Also check the plan exists in the platform Razorpay dashboard.
+# @name createPremiumYearly
+POST {{baseUrl}}/api/platform/catalog/plan-prices
+Content-Type: application/json
+
+{"planKey":"premium-new","displayName":"Premium Yearly new2","interval":"yearly","amountMinor":499900,"currencyCode":"INR"}
+
+### 409 — duplicate (acceptance 2: PlanPriceExistsError)
+POST {{baseUrl}}/api/platform/catalog/plan-prices
+Content-Type: application/json
+
+{"planKey":"premium","displayName":"Premium Yearly","interval":"yearly","amountMinor":499900,"currencyCode":"INR"}
+
+### 201 — USD plan price, no provider_products row (acceptance 3: Razorpay currencies = INR only)
+# MCP check: SELECT count(*) FROM provider_products WHERE ref_type = 'plan_price' AND ref_id = '<new id>'; -- expect 0
+# @name createPremiumUsd
+POST {{baseUrl}}/api/platform/catalog/plan-prices
+Content-Type: application/json
+
+{"planKey":"premium-usd","displayName":"Premium Monthly USD","interval":"monthly","amountMinor":999,"currencyCode":"USD"}
+
+### 200 — deactivate the USD price (acceptance 4)
+PATCH {{baseUrl}}/api/platform/catalog/plan-prices/{{createPremiumUsd.response.body.$.data.id}}
+Content-Type: application/json
+
+{"isActive":false}
+
+### 200 — PATCH with amountMinor (acceptance 4: zod strips unknown keys → ignored, returns unchanged row)
+PATCH {{baseUrl}}/api/platform/catalog/plan-prices/{{createPremiumUsd.response.body.$.data.id}}
+Content-Type: application/json
+
+{"amountMinor":1}
+
+### 409 — delete plan price with subscriptions (acceptance 5: PlanPriceInUseError)
+# Fill a plan price id that has subscriptions: SELECT platform_plan_price_id FROM subscriptions LIMIT 1;
+@inUsePlanPriceId = 00000000-0000-0000-0000-000000000000
+DELETE {{baseUrl}}/api/platform/catalog/plan-prices/{{inUsePlanPriceId}}
+
+### 200 — delete the unused USD price (acceptance 5)
+# MCP check: SELECT count(*) FROM provider_products WHERE ref_type = 'plan_price' AND ref_id = '<id>'; -- expect 0
+DELETE {{baseUrl}}/api/platform/catalog/plan-prices/{{createPremiumUsd.response.body.$.data.id}}

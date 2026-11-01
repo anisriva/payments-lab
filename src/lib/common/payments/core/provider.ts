@@ -7,10 +7,11 @@ import type {
   OneTimeCheckoutInput,
   PaymentStatusResult,
   ProviderCapabilities,
+  ProviderWebhook,
   SubscriptionCheckoutInput,
   SubscriptionStatusResult,
 } from './types';
-import { InvalidPaymentSignatureError, PaymentProviderError, PaymentValidationError } from './errors';
+import { InvalidPaymentSignatureError, PaymentCapabilityNotSupportedError, PaymentProviderError, PaymentRequestRejectedError, PaymentValidationError } from './errors';
 
 export interface PaymentProvider {
   readonly capabilities: ProviderCapabilities;
@@ -23,6 +24,10 @@ export interface PaymentProvider {
   verifyClientConfirmation(c: ClientConfirmation): boolean;
   parseWebhook(rawBody: string, headers: Record<string, string>): NormalizedEvent;
   verifyCredentials(): Promise<boolean>;
+  listWebhooks(): Promise<ProviderWebhook[]>;
+  createWebhook(input: { url: string; secret: string; events: string[] }): Promise<ProviderWebhook>;
+  updateWebhook(id: string, input: { url: string; secret: string; events: string[]; active: boolean }): Promise<ProviderWebhook>;
+  checkSubscriptionsAvailable(): Promise<boolean>;
 }
 
 export abstract class BasePaymentProvider implements PaymentProvider {
@@ -87,12 +92,38 @@ export abstract class BasePaymentProvider implements PaymentProvider {
     }
   }
 
+  async listWebhooks(): Promise<ProviderWebhook[]> {
+    return this.wrap(() => this.doListWebhooks());
+  }
+
+  async createWebhook(input: { url: string; secret: string; events: string[] }): Promise<ProviderWebhook> {
+    if (!input.url || !input.secret || input.events.length === 0) {
+      throw new PaymentValidationError('url, secret and at least one event are required');
+    }
+    return this.wrap(() => this.doCreateWebhook(input));
+  }
+
+  async updateWebhook(id: string, input: { url: string; secret: string; events: string[]; active: boolean }): Promise<ProviderWebhook> {
+    if (!id || !input.url || !input.secret || input.events.length === 0) {
+      throw new PaymentValidationError('id, url, secret and at least one event are required');
+    }
+    return this.wrap(() => this.doUpdateWebhook(id, input));
+  }
+
+  async checkSubscriptionsAvailable(): Promise<boolean> {
+    return this.wrap(() => this.doCheckSubscriptionsAvailable());
+  }
+
   private async wrap<T>(fn: () => Promise<T>): Promise<T> {
     try {
       return await fn();
     } catch (e) {
       if (e instanceof PaymentValidationError || e instanceof PaymentProviderError) {
         throw e;
+      }
+      const statusCode = (e as { statusCode?: unknown })?.statusCode;
+      if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {
+        throw new PaymentRequestRejectedError(this.capabilities.label, this.describeError(e));
       }
       throw new PaymentProviderError(this.capabilities.key, this.describeError(e), e);
     }
@@ -126,4 +157,23 @@ export abstract class BasePaymentProvider implements PaymentProvider {
   protected abstract doVerifyCredentials(): Promise<void>;
   protected abstract verifyWebhookSignature(rawBody: string, headers: Record<string, string>): boolean;
   protected abstract toNormalizedEvent(payload: unknown, headers: Record<string, string>): NormalizedEvent;
+
+  protected doListWebhooks(): Promise<ProviderWebhook[]> {
+    throw new PaymentCapabilityNotSupportedError(this.capabilities.label, 'webhook registration');
+  }
+
+  protected doCreateWebhook(input: { url: string; secret: string; events: string[] }): Promise<ProviderWebhook> {
+    void input;
+    throw new PaymentCapabilityNotSupportedError(this.capabilities.label, 'webhook registration');
+  }
+
+  protected doUpdateWebhook(id: string, input: { url: string; secret: string; events: string[]; active: boolean }): Promise<ProviderWebhook> {
+    void id;
+    void input;
+    throw new PaymentCapabilityNotSupportedError(this.capabilities.label, 'webhook registration');
+  }
+
+  protected doCheckSubscriptionsAvailable(): Promise<boolean> {
+    return Promise.resolve(this.capabilities.supportsSubscriptions);
+  }
 }

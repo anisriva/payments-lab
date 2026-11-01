@@ -26,6 +26,25 @@ export class ProviderProductDAO {
     });
   }
 
+  async listByRefs(refType: ProviderProductRefType, refIds: string[]): Promise<ProviderProduct[]> {
+    return await this.prisma.providerProduct.findMany({
+      where: {
+        refType,
+        refId: { in: refIds },
+      },
+    });
+  }
+
+  async deleteByRef(refType: ProviderProductRefType, refId: string): Promise<void> {
+    try {
+      await this.prisma.providerProduct.deleteMany({
+        where: { refType, refId },
+      });
+    } catch (error) {
+      throw new DatabaseException(error, 'provider product');
+    }
+  }
+
   async create(data: ProviderProductCreateInput): Promise<ProviderProduct> {
     try {
       return await this.prisma.providerProduct.create({

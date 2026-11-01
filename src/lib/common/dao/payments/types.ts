@@ -24,11 +24,37 @@ export interface ProviderEventCreateInput {
   rawBody: string;
 }
 
+export interface PaymentProviderSettingUpsertInput {
+  isEnabled?: boolean;
+  receiverCountries: string[];
+  payerCountries: string[];
+  currencies: string[];
+}
+
+export interface PaymentProviderSettingUpdateInput {
+  isEnabled?: boolean;
+  receiverCountries?: string[];
+  payerCountries?: string[];
+  currencies?: string[];
+  webhookRef?: string | null;
+  webhookRegisteredAt?: Date | null;
+  webhookError?: string | null;
+  validationReport?: Prisma.InputJsonValue;
+  validatedAt?: Date | null;
+}
+
+export interface PaymentProviderSettingListOptions {
+  pagination?: PaginationInput;
+  sort?: SortOptions;
+}
+
 export interface ProviderEventListOptions {
   pagination?: PaginationInput;
   sort?: SortOptions;
   filters?: {
     provider?: PaymentProvider;
     scope?: string;
+    scopes?: string[];
+    excludeScope?: string;
   };
 }

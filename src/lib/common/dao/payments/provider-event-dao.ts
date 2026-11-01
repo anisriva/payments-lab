@@ -45,6 +45,14 @@ export class ProviderEventDAO {
     });
   }
 
+  async findLatest(provider: PaymentProvider, scope: string): Promise<{ eventType: string; receivedAt: Date } | null> {
+    return await this.prisma.providerEvent.findFirst({
+      where: { provider, scope },
+      orderBy: { receivedAt: 'desc' },
+      select: { eventType: true, receivedAt: true },
+    });
+  }
+
   async create(data: ProviderEventCreateInput): Promise<ProviderEvent> {
     try {
       return await this.prisma.providerEvent.create({
@@ -89,6 +97,8 @@ export class ProviderEventDAO {
     const where: Prisma.ProviderEventWhereInput = {
       ...(filters.provider && { provider: filters.provider }),
       ...(filters.scope && { scope: filters.scope }),
+      ...(filters.scopes && { scope: { in: filters.scopes } }),
+      ...(filters.excludeScope && { scope: { not: filters.excludeScope } }),
     };
 
     const orderBy: Prisma.ProviderEventOrderByWithRelationInput = sort

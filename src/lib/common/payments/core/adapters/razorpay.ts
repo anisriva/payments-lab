@@ -12,6 +12,8 @@ import type {
   PaymentEnvironment,
   PaymentStatusResult,
   ProviderCapabilities,
+  ProviderProfile,
+  ProviderWebhook,
   SubscriptionCheckoutInput,
   SubscriptionStatus,
   SubscriptionStatusResult,
@@ -24,8 +26,54 @@ export const RAZORPAY_CAPABILITIES: ProviderCapabilities = {
   flows: ['platform', 'project'],
   receiverCountries: ['IN'],
   payerCountries: ['IN'],
+  currencies: ['INR'],
   supportsSubscriptions: true,
   supportsCustomAmount: true,
+};
+
+export const RAZORPAY_PROFILE: ProviderProfile = {
+  key: 'razorpay',
+  credentialFields: [
+    { key: 'keyId', label: 'Key ID', secret: false, placeholder: 'rzp_test_…', help: 'Account & Settings → API Keys' },
+    { key: 'keySecret', label: 'Key secret', secret: true, help: 'Shown only once when you generate the keys' },
+  ],
+  webhook: {
+    autoRegister: true,
+    canUpdate: true,
+    canDeactivate: true,
+    canDelete: false,
+    events: [
+      'payment.captured',
+      'payment.failed',
+      'order.paid',
+      'subscription.activated',
+      'subscription.charged',
+      'subscription.cancelled',
+      'subscription.halted',
+      'subscription.completed',
+    ],
+    secretSource: 'generated',
+  },
+  catalog: { plansEditable: false, plansDeletable: false },
+  constraints: [
+    'International payments need completed KYC and activation by Razorpay.',
+    'Test and live modes use separate keys.',
+    "Plans can't be edited or deleted once created.",
+    "Webhooks can't be deleted through the API — they can be disabled, or deleted in the Razorpay dashboard.",
+  ],
+  onboarding: [
+    { title: 'Create a Razorpay account', body: 'Sign up for a Razorpay account.', docsUrl: 'https://razorpay.com/signup' },
+    { title: 'Switch to Test Mode', body: 'Use the toggle at the top of the dashboard.' },
+    { title: 'Generate test API keys', body: 'Account & Settings → API Keys → Generate Test Key; the secret is shown once.' },
+    { title: 'Paste your keys', body: 'We validate them and register the webhook for you.' },
+  ],
+  validationChecks: [
+    { key: 'receiver_country', label: 'Country supported', blocking: true },
+    { key: 'key_mode', label: 'Key matches test/live mode', blocking: true },
+    { key: 'keys_valid', label: 'Keys accepted by Razorpay', blocking: true },
+    { key: 'subscriptions_available', label: 'Subscriptions available on this account', blocking: false },
+    { key: 'webhook_registered', label: 'Webhook registered', blocking: false },
+  ],
 };
 
 export interface RazorpayCredentials {
@@ -293,6 +341,80 @@ export class RazorpayProvider extends BasePaymentProvider {
         return 'completed';
       default:
         return 'pending';
+    }
+  }
+
+  // ── Webhook registration (merchant-context endpoints, undocumented — use fetch) ──
+
+  private webhookAuth(): string {
+    return 'Basic ' + Buffer.from(`${this.credentials.keyId}:${this.credentials.keySecret}`).toString('base64');
+  }
+
+  private async webhookRequest<T>(method: string, path = '', body?: unknown): Promise<T> {
+    const res = await fetch(`https://api.razorpay.com/v1/webhooks${path}`, {
+      method,
+      headers: { Authorization: this.webhookAuth(), 'Content-Type': 'application/json' },
+      ...(body !== undefined && { body: JSON.stringify(body) }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      const description = (json as { error?: { description?: string } } | null)?.error?.description ?? `HTTP ${res.status}`;
+      throw { statusCode: res.status, error: { description } };
+    }
+    return json as T;
+  }
+
+  private toProviderWebhook(item: unknown): ProviderWebhook {
+    const w = item as { id: string; url: string; active: boolean; events: Record<string, boolean> };
+    return {
+      id: w.id,
+      url: w.url,
+      active: w.active,
+      events: Object.entries(w.events ?? {}).filter(([, v]) => v).map(([k]) => k),
+    };
+  }
+
+  protected async doListWebhooks(): Promise<ProviderWebhook[]> {
+    const items: unknown[] = [];
+    let skip = 0;
+    for (;;) {
+      const res = await this.webhookRequest<{ items?: unknown[] }>('GET', `?count=100&skip=${skip}`);
+      const page = res.items ?? [];
+      items.push(...page);
+      if (page.length < 100) break;
+      skip += page.length;
+    }
+    return items.map((i) => this.toProviderWebhook(i));
+  }
+
+  protected async doCreateWebhook(input: { url: string; secret: string; events: string[] }): Promise<ProviderWebhook> {
+    const res = await this.webhookRequest<unknown>('POST', '', {
+      url: input.url,
+      secret: input.secret,
+      active: true,
+      events: Object.fromEntries(input.events.map((e) => [e, true])),
+    });
+    return this.toProviderWebhook(res);
+  }
+
+  protected async doUpdateWebhook(id: string, input: { url: string; secret: string; events: string[]; active: boolean }): Promise<ProviderWebhook> {
+    const res = await this.webhookRequest<unknown>('PUT', `/${id}`, {
+      url: input.url,
+      secret: input.secret,
+      active: input.active,
+      events: Object.fromEntries(input.events.map((e) => [e, true])),
+    });
+    return this.toProviderWebhook(res);
+  }
+
+  protected async doCheckSubscriptionsAvailable(): Promise<boolean> {
+    try {
+      await this.razorpay.plans.all({ count: 1 });
+      return true;
+    } catch (e) {
+      const statusCode = (e as { statusCode?: unknown })?.statusCode;
+      if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) return false;
+      throw e;
     }
   }
 }

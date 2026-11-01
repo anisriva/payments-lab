@@ -55,6 +55,13 @@ export class SubscriptionDAO {
     }
   }
 
+  async existsForPlanPrice(planPriceId: string): Promise<boolean> {
+    const count = await this.prisma.subscription.count({
+      where: { platformPlanPriceId: planPriceId },
+    });
+    return count > 0;
+  }
+
   async list(options: SubscriptionListOptions = {}): Promise<PaginationResult<SubscriptionWithPlanPrice>> {
     const { pagination, sort, filters = {} } = options;
 

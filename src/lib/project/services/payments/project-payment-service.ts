@@ -1,13 +1,20 @@
-import type { PrismaClient, ProjectOrder, ProjectSubscription } from '@/generated/prisma';
+import { randomUUID } from 'node:crypto';
+import type { PrismaClient, ProjectOffering, ProjectOrder, ProjectSubscription } from '@/generated/prisma';
+import type { PrismaTransaction } from '@/lib/common/dao';
 import { ProjectDAO } from '@/lib/platform/dao/projects/project-dao';
 import { ProjectOfferingDAO } from '@/lib/project/dao/payments/project-offering-dao';
 import { ProjectOrderDAO } from '@/lib/project/dao/payments/project-order-dao';
 import { ProjectSubscriptionDAO } from '@/lib/project/dao/payments/project-subscription-dao';
+import { ProviderProductDAO } from '@/lib/common/dao/payments/provider-product-dao';
+import { PaymentConnectionDAO } from '@/lib/project/dao/payments/payment-connection-dao';
 import { PaymentConnectionService } from './payment-connection-service';
 import { ProviderProductService } from '@/lib/common/services/payments/provider-product-service';
+import { ProviderSettingsService } from '@/lib/common/services/payments/provider-settings-service';
+import { CountryService } from '@/lib/common/services/catalog/country-service';
 import { canMovePayment, canMoveSubscription } from '@/lib/common/services/payments/payment-transitions';
 import { SUBSCRIPTION_TOTAL_CYCLES } from '@/lib/common/services/payments/payment-constants';
 import { getPaymentEnvironment } from '@/lib/common/services/payments/payment-config';
+import { currencyAllowed } from '@/lib/common/payments/core/factory';
 import { InvalidPaymentSignatureError } from '@/lib/common/payments/core/errors';
 import type { CheckoutInstruction, NormalizedEvent } from '@/lib/common/payments/core/types';
 import type { PaginationInput } from '@/types/common/pagination';
@@ -15,8 +22,10 @@ import type { PaymentProvider as DbProvider } from '@/generated/prisma';
 import { ProjectNotFoundError } from '@/lib/platform/services/projects/errors';
 import {
   AmountBelowMinimumError,
+  CurrencyNotSupportedError,
   GatewayNotConnectedError,
   InvalidOfferingError,
+  OfferingInUseError,
   OfferingNotFoundError,
   OfferingNotPurchasableError,
   ProjectOrderNotFoundError,
@@ -24,27 +33,54 @@ import {
 } from './errors';
 import { PaymentNotStartedError } from '@/lib/platform/services/payments/errors';
 
-const CURRENCY = 'INR';
-
 export class ProjectPaymentService {
   private projectDAO: ProjectDAO;
   private offeringDAO: ProjectOfferingDAO;
   private orderDAO: ProjectOrderDAO;
   private subscriptionDAO: ProjectSubscriptionDAO;
+  private providerProductDAO: ProviderProductDAO;
+  private connectionDAO: PaymentConnectionDAO;
   private paymentConnectionService: PaymentConnectionService;
   private providerProductService: ProviderProductService;
+  private providerSettingsService: ProviderSettingsService;
+  private countryService: CountryService;
 
   constructor(private readonly prisma: PrismaClient) {
     this.projectDAO = new ProjectDAO(prisma);
     this.offeringDAO = new ProjectOfferingDAO(prisma);
     this.orderDAO = new ProjectOrderDAO(prisma);
     this.subscriptionDAO = new ProjectSubscriptionDAO(prisma);
+    this.providerProductDAO = new ProviderProductDAO(prisma);
+    this.connectionDAO = new PaymentConnectionDAO(prisma);
     this.paymentConnectionService = new PaymentConnectionService(prisma);
     this.providerProductService = new ProviderProductService(prisma);
+    this.providerSettingsService = new ProviderSettingsService(prisma);
+    this.countryService = new CountryService(prisma);
   }
 
   async listOfferings(projectId: string, pagination?: PaginationInput) {
     return this.offeringDAO.listByProject(projectId, { pagination });
+  }
+
+  async listActiveOfferings(projectId: string, pagination?: PaginationInput) {
+    return this.offeringDAO.listActiveByProject(projectId, { pagination });
+  }
+
+  async listOfferingsForSetup(projectId: string, pagination?: PaginationInput) {
+    const result = await this.offeringDAO.listByProject(projectId, { pagination });
+    const products = await this.providerProductDAO.listByRefs(
+      'offering',
+      result.data.map((o) => o.id)
+    );
+    return {
+      ...result,
+      data: result.data.map((o) => ({
+        ...o,
+        providerRefs: products
+          .filter((r) => r.refId === o.id)
+          .map((r) => ({ scope: r.scope, provider: r.provider, providerRef: r.providerRef })),
+      })),
+    };
   }
 
   async listOrders(input: { projectId: string; provider?: DbProvider; pagination?: PaginationInput }) {
@@ -67,13 +103,73 @@ export class ProjectPaymentService {
     if (data.priceType !== 'recurring' && data.interval) {
       throw new InvalidOfferingError('only recurring offerings may have an interval');
     }
-    return this.offeringDAO.create({ projectId, name: data.name, priceType: data.priceType, amountMinor: data.amountMinor, interval: data.interval, currencyCode: CURRENCY, isActive: true });
+
+    const currencyCode = (await this.countryService.getCountry(project.countryCode)).currencyCode;
+    const id = data.priceType === 'recurring' ? randomUUID() : undefined;
+
+    // Eager plan creation at every enabled connection that supports it
+    // (external calls — outside any transaction; any failure aborts the create)
+    if (data.priceType === 'recurring') {
+      const connections = await this.connectionDAO.listEnabledByProject(projectId);
+      for (const connection of connections) {
+        const caps = await this.providerSettingsService.getEffectiveCapability(connection.provider, 'project');
+        if (!caps.supportsSubscriptions || !currencyAllowed(caps.currencies, currencyCode)) continue;
+        const { adapter } = await this.paymentConnectionService.getAdapter(connection.id, { requireEnabled: true });
+        await this.providerProductService.ensure({
+          scope: connection.id,
+          provider: connection.provider,
+          environment: getPaymentEnvironment(),
+          refType: 'offering',
+          refId: id!,
+          adapter,
+          product: {
+            name: data.name,
+            amount: { amountMinor: data.amountMinor, currency: currencyCode },
+            interval: data.interval!,
+          },
+        });
+      }
+    }
+
+    return this.offeringDAO.create({ id, projectId, name: data.name, priceType: data.priceType, amountMinor: data.amountMinor, interval: data.interval, currencyCode, isActive: true });
+  }
+
+  async updateOffering(
+    projectId: string,
+    offeringId: string,
+    data: { name?: string; isActive?: boolean }
+  ): Promise<ProjectOffering> {
+    const offering = await this.offeringDAO.findById(offeringId);
+    if (!offering || offering.projectId !== projectId) throw new OfferingNotFoundError(offeringId);
+    return this.offeringDAO.update(offeringId, data);
+  }
+
+  async deleteOffering(projectId: string, offeringId: string): Promise<void> {
+    const offering = await this.offeringDAO.findById(offeringId);
+    if (!offering || offering.projectId !== projectId) throw new OfferingNotFoundError(offeringId);
+    if (
+      (await this.orderDAO.existsForOffering(offeringId)) ||
+      (await this.subscriptionDAO.existsForOffering(offeringId))
+    ) {
+      throw new OfferingInUseError(offeringId);
+    }
+    await this.prisma.$transaction(async (tx: PrismaTransaction) => {
+      await new ProviderProductDAO(tx).deleteByRef('offering', offeringId);
+      await new ProjectOfferingDAO(tx).delete(offeringId);
+    });
   }
 
   private async getActiveConnection(projectId: string, provider: string) {
     const connection = await this.paymentConnectionService.getForProject(projectId, provider);
     if (!connection || !connection.isEnabled) throw new GatewayNotConnectedError(provider);
     return this.paymentConnectionService.getAdapter(connection.id, { requireEnabled: true });
+  }
+
+  private async assertCurrencySupported(provider: DbProvider, currencyCode: string) {
+    const caps = await this.providerSettingsService.getEffectiveCapability(provider, 'project');
+    if (!currencyAllowed(caps.currencies, currencyCode)) {
+      throw new CurrencyNotSupportedError(caps.label, currencyCode);
+    }
   }
 
   async startOrder(projectId: string, input: { provider: string; offeringId: string; buyerEmail: string; amountMinor?: number }): Promise<{ recordId: string; instruction: CheckoutInstruction }> {
@@ -93,17 +189,18 @@ export class ProjectPaymentService {
     }
 
     const { connection, adapter } = await this.getActiveConnection(projectId, input.provider);
+    await this.assertCurrencySupported(connection.provider, offering.currencyCode);
 
     const order = await this.orderDAO.create({
       projectId, connectionId: connection.id, offeringId: offering.id, provider: connection.provider,
       environment: getPaymentEnvironment(), buyerEmail: input.buyerEmail,
-      amountMinor, currencyCode: CURRENCY, status: 'pending',
+      amountMinor, currencyCode: offering.currencyCode, status: 'pending',
     });
 
     let checkout;
     try {
       checkout = await adapter.createOneTimeCheckout({
-        amount: { amountMinor, currency: CURRENCY },
+        amount: { amountMinor, currency: offering.currencyCode },
         description: offering.name, receipt: order.id, buyerEmail: input.buyerEmail,
         notes: { flow: 'project', recordId: order.id },
       });
@@ -121,6 +218,7 @@ export class ProjectPaymentService {
     if (offering.priceType !== 'recurring') throw new OfferingNotPurchasableError(offering.name);
 
     const { connection, adapter } = await this.getActiveConnection(projectId, input.provider);
+    await this.assertCurrencySupported(connection.provider, offering.currencyCode);
 
     const productRef = await this.providerProductService.ensure({
       scope: connection.id, provider: connection.provider, environment: getPaymentEnvironment(),

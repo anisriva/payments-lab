@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 
-export function CreateOfferingForm({ projectId }: { projectId: string }) {
+export function CreateOfferingForm({ projectId, currencyCode }: { projectId: string; currencyCode: string }) {
   const router = useRouter();
   const create = useCreateProjectOffering(projectId);
   const [open, setOpen] = useState(false);
@@ -42,12 +42,14 @@ export function CreateOfferingForm({ projectId }: { projectId: string }) {
                 </Select><FormMessage /></FormItem>
             )} />
             <FormField control={form.control} name="amountMinor" render={({ field }) => (
-              <FormItem><FormLabel>{priceType === 'custom' ? 'Minimum amount (₹)' : 'Amount (₹)'}</FormLabel>
+              <FormItem><FormLabel>{priceType === 'custom' ? `Minimum amount (${currencyCode})` : `Amount (${currencyCode})`}</FormLabel>
                 <FormControl>
                   <Input type="number" step="0.01" min="1"
                     value={Number.isNaN(field.value) ? '' : field.value / 100}
                     onChange={(e) => field.onChange(Number.isNaN(e.target.valueAsNumber) ? NaN : Math.round(e.target.valueAsNumber * 100))} />
-                </FormControl><FormMessage /></FormItem>
+                </FormControl>
+                <p className="text-sm text-muted-foreground">Currency: {currencyCode} (project country)</p>
+                <FormMessage /></FormItem>
             )} />
             {priceType === 'recurring' && (
               <FormField control={form.control} name="interval" render={({ field }) => (

@@ -4,14 +4,13 @@ import { useRouter } from 'next/navigation';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { projectCreateSchema, type ProjectCreate } from '@/schemas/platform/projects/project.schema';
 import { useCreateProject } from '@/hooks/platform/projects/use-create-project';
-import { PAYER_COUNTRIES } from '@/lib/common/services/payments/payment-constants';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 
-export function CreateProjectForm() {
+export function CreateProjectForm({ countries }: { countries: { code: string; name: string }[] }) {
   const router = useRouter();
   const create = useCreateProject();
   const form = useForm<ProjectCreate>({
@@ -31,7 +30,7 @@ export function CreateProjectForm() {
               <FormItem><FormLabel>Country</FormLabel>
                 <Select value={field.value} onValueChange={field.onChange}>
                   <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                  <SelectContent>{PAYER_COUNTRIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                  <SelectContent>{countries.map((c) => <SelectItem key={c.code} value={c.code}>{c.code} — {c.name}</SelectItem>)}</SelectContent>
                 </Select><FormMessage /></FormItem>
             )} />
           </CardContent>

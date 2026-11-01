@@ -1,0 +1,5 @@
+@baseUrl = http://localhost:3000
+
+### 200 — validate platform razorpay (checks + webhook ensure)
+# Localhost → webhook_registered warn; deployed → pass and webhook in dashboard
+POST {{baseUrl}}/api/platform/payments/providers/razorpay/validate

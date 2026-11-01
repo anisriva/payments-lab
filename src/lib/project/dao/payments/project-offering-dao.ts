@@ -2,7 +2,7 @@ import { paginate, PrismaTransaction } from '@/lib/common/dao';
 import { PaginationResult } from '@/types/common/pagination';
 import { DatabaseException } from '@/lib/common/exceptions';
 import type { PrismaClient, ProjectOffering, Prisma } from '@/generated/prisma';
-import type { ProjectOfferingCreateInput, ProjectOfferingListOptions } from './types';
+import type { ProjectOfferingCreateInput, ProjectOfferingUpdateInput, ProjectOfferingListOptions } from './types';
 
 export class ProjectOfferingDAO {
   constructor(private prisma: PrismaClient | PrismaTransaction) {}
@@ -21,6 +21,41 @@ export class ProjectOfferingDAO {
     } catch (error) {
       throw new DatabaseException(error, 'project offering');
     }
+  }
+
+  async update(id: string, data: ProjectOfferingUpdateInput): Promise<ProjectOffering> {
+    try {
+      return await this.prisma.projectOffering.update({
+        where: { id },
+        data,
+      });
+    } catch (error) {
+      throw new DatabaseException(error, 'project offering');
+    }
+  }
+
+  async delete(id: string): Promise<ProjectOffering> {
+    try {
+      return await this.prisma.projectOffering.delete({
+        where: { id },
+      });
+    } catch (error) {
+      throw new DatabaseException(error, 'project offering');
+    }
+  }
+
+  async existsForProject(projectId: string): Promise<boolean> {
+    const count = await this.prisma.projectOffering.count({
+      where: { projectId },
+    });
+    return count > 0;
+  }
+
+  async listActiveByProject(projectId: string, options: ProjectOfferingListOptions = {}): Promise<PaginationResult<ProjectOffering>> {
+    return this.listByProject(projectId, {
+      ...options,
+      filters: { ...options.filters, isActive: true },
+    });
   }
 
   async listByProject(projectId: string, options: ProjectOfferingListOptions = {}): Promise<PaginationResult<ProjectOffering>> {

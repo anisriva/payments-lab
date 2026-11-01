@@ -1,5 +1,6 @@
 import type {
   BillingInterval,
+  Prisma,
   OfferingPriceType,
   PaymentEnvironment,
   PaymentProvider,
@@ -24,15 +25,27 @@ export interface PaymentConnectionUpdateInput {
   displayHint?: string;
   isEnabled?: boolean;
   verifiedAt?: Date | null;
+  webhookRef?: string | null;
+  webhookActive?: boolean | null;
+  webhookRegisteredAt?: Date | null;
+  webhookError?: string | null;
+  validationReport?: Prisma.InputJsonValue;
+  validatedAt?: Date | null;
 }
 
 export interface ProjectOfferingCreateInput {
+  id?: string;
   projectId: string;
   name: string;
   priceType: OfferingPriceType;
   amountMinor: number;
   currencyCode: string;
   interval?: BillingInterval | null;
+  isActive?: boolean;
+}
+
+export interface ProjectOfferingUpdateInput {
+  name?: string;
   isActive?: boolean;
 }
 

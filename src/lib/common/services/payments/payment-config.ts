@@ -6,13 +6,10 @@ import type { ProviderKey, PaymentEnvironment } from '@/lib/common/payments/core
 
 export {
   PLATFORM_RECEIVER_COUNTRY,
-  PLATFORM_CURRENCY,
-  CREDIT_RATE_MINOR,
   CREDIT_QUICK_PICKS,
   MIN_CREDITS,
   MAX_CREDITS,
   SUBSCRIPTION_TOTAL_CYCLES,
-  PAYER_COUNTRIES,
 } from './payment-constants';
 
 export function getPaymentEnvironment(): PaymentEnvironment {
