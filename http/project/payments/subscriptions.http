@@ -1,0 +1,30 @@
+@baseUrl = http://localhost:3000
+# Fill from MCP: SELECT id FROM projects ORDER BY created_at DESC LIMIT 1; SELECT id FROM project_offerings WHERE price_type='recurring' ORDER BY created_at DESC LIMIT 1;
+@projectId = 00000000-0000-0000-0000-000000000000
+@recurringOfferingId = 00000000-0000-0000-0000-000000000000
+
+### 201 — start a subscription (plan is created in the creator's Razorpay account)
+# MCP check: SELECT status, provider_subscription_id FROM project_subscriptions ORDER BY created_at DESC LIMIT 1;
+# @name startProjectSub
+POST {{baseUrl}}/api/project/{{projectId}}/payments/subscriptions
+Content-Type: application/json
+
+{"provider":"razorpay","offeringId":"{{recurringOfferingId}}","buyerEmail":"buyer@test.com"}
+
+### 200 — sync subscription
+GET {{baseUrl}}/api/project/{{projectId}}/payments/subscriptions/{{startProjectSub.response.body.$.data.recordId}}
+
+### 400 — confirm with fake signature
+POST {{baseUrl}}/api/project/{{projectId}}/payments/subscriptions/{{startProjectSub.response.body.$.data.recordId}}/confirm
+Content-Type: application/json
+
+{"paymentId":"pay_fake","signature":"deadbeef"}
+
+### 200 — refresh
+POST {{baseUrl}}/api/project/{{projectId}}/payments/subscriptions/{{startProjectSub.response.body.$.data.recordId}}/refresh
+
+### 200 — cancel (only on an active subscription)
+POST {{baseUrl}}/api/project/{{projectId}}/payments/subscriptions/{{startProjectSub.response.body.$.data.recordId}}/cancel
+Content-Type: application/json
+
+{"atCycleEnd":false}

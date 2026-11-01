@@ -1,0 +1,30 @@
+@baseUrl = http://localhost:3000
+# Fill from: SELECT id FROM projects ORDER BY created_at DESC LIMIT 1;
+@projectId = 00000000-0000-0000-0000-000000000000
+
+### 201 — create a fixed offering
+# MCP check: SELECT name, price_type, amount_minor FROM project_offerings ORDER BY created_at DESC LIMIT 1;
+# @name createOffering
+POST {{baseUrl}}/api/platform/projects/{{projectId}}/payments/offerings
+Content-Type: application/json
+
+{"name":"Portrait session","priceType":"fixed","amountMinor":50000}
+
+### 201 — create a custom (min-amount) offering
+POST {{baseUrl}}/api/platform/projects/{{projectId}}/payments/offerings
+Content-Type: application/json
+
+{"name":"Donation","priceType":"custom","amountMinor":5000}
+
+### 201 — create a recurring offering
+# @name createRecurring
+POST {{baseUrl}}/api/platform/projects/{{projectId}}/payments/offerings
+Content-Type: application/json
+
+{"name":"Monthly retainer","priceType":"recurring","amountMinor":100000,"interval":"monthly"}
+
+### 400 — recurring without interval
+POST {{baseUrl}}/api/platform/projects/{{projectId}}/payments/offerings
+Content-Type: application/json
+
+{"name":"Bad plan","priceType":"recurring","amountMinor":100000}

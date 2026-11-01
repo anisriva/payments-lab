@@ -21,7 +21,7 @@ const eslintConfig = [
     ],
   },
   {
-    files: ['src/lib/payments/core/**/*.ts'],
+    files: ['src/lib/common/payments/core/**/*.ts'],
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [
@@ -29,6 +29,17 @@ const eslintConfig = [
             message: 'payments/core must stay framework-free.' },
           { regex: '(^|/)(db|generated|services)(/|$)',
             message: 'payments/core must not reach into db, generated or services.' },
+        ],
+      }],
+    },
+  },
+  {
+    files: ['src/lib/**/services/**/*.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          { group: ['@/lib/common/connectors/prisma'],
+            message: 'Services receive PrismaClient via the constructor (4.service.md).' },
         ],
       }],
     },

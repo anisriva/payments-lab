@@ -1,0 +1,61 @@
+@baseUrl = http://localhost:3000
+
+### 201 — start a fixed credit purchase (check instruction.options.order_id starts with "order_")
+# MCP check: SELECT status, provider_order_id FROM ai_credit_purchases ORDER BY created_at DESC LIMIT 1;
+# @name startPurchase
+POST {{baseUrl}}/api/platform/payments/credit-purchases
+Content-Type: application/json
+
+{"gateway":"razorpay","payerCountry":"IN","credits":500,"kind":"fixed"}
+
+### 201 — start a custom credit purchase (check amount_minor = 36850 for 737 credits)
+# MCP check: SELECT credits, amount_minor, status FROM ai_credit_purchases ORDER BY created_at DESC LIMIT 1;
+# @name startCustomPurchase
+POST {{baseUrl}}/api/platform/payments/credit-purchases
+Content-Type: application/json
+
+{"gateway":"razorpay","payerCountry":"IN","credits":737,"kind":"custom"}
+
+### 200 — sync the purchase (check status field; pending until checkout completes)
+# MCP check: SELECT status, provider_payment_id, paid_at FROM ai_credit_purchases ORDER BY created_at DESC LIMIT 1;
+GET {{baseUrl}}/api/platform/payments/credit-purchases/{{startPurchase.response.body.$.data.recordId}}
+
+### 400 — custom amount below minimum (InvalidCreditAmountError message)
+POST {{baseUrl}}/api/platform/payments/credit-purchases
+Content-Type: application/json
+
+{"gateway":"razorpay","payerCountry":"IN","credits":50,"kind":"custom"}
+
+### 400 — invalid fixed credit amount (InvalidCreditAmountError message)
+POST {{baseUrl}}/api/platform/payments/credit-purchases
+Content-Type: application/json
+
+{"gateway":"razorpay","payerCountry":"IN","credits":123,"kind":"fixed"}
+
+### 400 — auto gateway with US payer has no provider (check selector reason in error)
+POST {{baseUrl}}/api/platform/payments/credit-purchases
+Content-Type: application/json
+
+{"gateway":"auto","payerCountry":"US","credits":500,"kind":"fixed"}
+
+### 400 — not-implemented gateway (ProviderNotImplementedError)
+POST {{baseUrl}}/api/platform/payments/credit-purchases
+Content-Type: application/json
+
+{"gateway":"dodo","payerCountry":"IN","credits":500,"kind":"fixed"}
+
+### 400 — unknown gateway (ProviderNotImplementedError)
+POST {{baseUrl}}/api/platform/payments/credit-purchases
+Content-Type: application/json
+
+{"gateway":"foo","payerCountry":"IN","credits":500,"kind":"fixed"}
+
+### 400 — confirm with fake signature (InvalidPaymentSignatureError)
+POST {{baseUrl}}/api/platform/payments/credit-purchases/{{startPurchase.response.body.$.data.recordId}}/confirm
+Content-Type: application/json
+
+{"paymentId":"pay_fake","signature":"deadbeef"}
+
+### 200 — refresh the purchase status from Razorpay
+# MCP check: SELECT status FROM ai_credit_purchases ORDER BY created_at DESC LIMIT 1;
+POST {{baseUrl}}/api/platform/payments/credit-purchases/{{startPurchase.response.body.$.data.recordId}}/refresh

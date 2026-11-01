@@ -1,0 +1,23 @@
+@baseUrl = http://localhost:3000
+
+### 201 — create a project
+# MCP check: SELECT id, name, country_code FROM projects ORDER BY created_at DESC LIMIT 1;
+# @name createProject
+POST {{baseUrl}}/api/platform/projects
+Content-Type: application/json
+
+{"name":"Step 6 Test Project","countryCode":"IN"}
+
+### 409 — duplicate project name
+POST {{baseUrl}}/api/platform/projects
+Content-Type: application/json
+
+{"name":"Step 6 Test Project","countryCode":"IN"}
+
+### 201 — create a US project
+# MCP check: SELECT id, name, country_code FROM projects ORDER BY created_at DESC LIMIT 1;
+# @name createUSProject
+POST {{baseUrl}}/api/platform/projects
+Content-Type: application/json
+
+{"name":"Step 6 Test US Project","countryCode":"US"}

@@ -1,0 +1,34 @@
+@baseUrl = http://localhost:3000
+# Fill from: SELECT id FROM projects ORDER BY created_at DESC LIMIT 1;
+@projectId = 3df0a2f4-9bdc-475f-8c53-a924219c2fda
+# Fill US project id for the country check (SELECT id FROM projects WHERE country_code = 'US' LIMIT 1;)
+@usProjectId = 6c52140f-38de-4a95-b463-e8687e3e3854
+# Fill from: SELECT id FROM payment_connections ORDER BY created_at DESC LIMIT 1;
+@paymentConnectionId = 00000000-0000-0000-0000-000000000000
+# Razorpay test keys
+@razorpayKeyId = rzp_test_TuYUk4L4p9ULe1
+@razorpayKeySecret = czjKW4I5FpkSzSLDqGNhrau0
+@razorpayWebhookSecret = your_webhook_secret
+### 400 — connect with wrong keys (GatewayCredentialsRejectedError)
+POST {{baseUrl}}/api/platform/projects/{{projectId}}/payments/connections
+Content-Type: application/json
+
+{"provider":"razorpay","keyId":"{{razorpayKeyId}}","keySecret":"{{razorpayKeySecret}}","webhookSecret":"{{razorpayWebhookSecret}}"}
+
+### 200 — connect with creator keys (response has no secrets; credentials_enc starts with v1:)
+# MCP check: SELECT id, provider, display_hint, is_enabled, left(credentials_enc, 3) AS enc_prefix FROM payment_connections ORDER BY created_at DESC LIMIT 1;
+# @name connectRazorpay
+POST {{baseUrl}}/api/platform/projects/{{projectId}}/payments/connections
+Content-Type: application/json
+
+{"provider":"razorpay","keyId":"{{razorpayKeyId}}","keySecret":"{{razorpayKeySecret}}","webhookSecret":"{{razorpayWebhookSecret}}"}
+
+### 400 — US project (GatewayCountryNotSupportedError)
+POST {{baseUrl}}/api/platform/projects/{{usProjectId}}/payments/connections
+Content-Type: application/json
+
+{"provider":"razorpay","keyId":"{{razorpayKeyId}}","keySecret":"{{razorpayKeySecret}}","webhookSecret":"{{razorpayWebhookSecret}}"}
+
+### 200 — disconnect
+# MCP check: SELECT is_enabled FROM payment_connections ORDER BY created_at DESC LIMIT 1;
+DELETE {{baseUrl}}/api/platform/projects/{{projectId}}/payments/connections/{{connectRazorpay.response.body.$.data.id}}

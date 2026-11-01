@@ -1,0 +1,37 @@
+@baseUrl = http://localhost:3000
+# Fill projectId and offeringId from MCP: SELECT id FROM projects ORDER BY created_at DESC LIMIT 1; SELECT id FROM project_offerings WHERE price_type != 'recurring' ORDER BY created_at DESC LIMIT 1;
+@projectId = 00000000-0000-0000-0000-000000000000
+@offeringId = 00000000-0000-0000-0000-000000000000
+@customOfferingId = 00000000-0000-0000-0000-000000000000
+
+### 201 — start an order (check instruction.options.order_id)
+# MCP check: SELECT status, provider_order_id FROM project_orders ORDER BY created_at DESC LIMIT 1;
+# @name startOrder
+POST {{baseUrl}}/api/project/{{projectId}}/payments/orders
+Content-Type: application/json
+
+{"provider":"razorpay","offeringId":"{{offeringId}}","buyerEmail":"buyer@test.com"}
+
+### 201 — custom offering above minimum
+POST {{baseUrl}}/api/project/{{projectId}}/payments/orders
+Content-Type: application/json
+
+{"provider":"razorpay","offeringId":"{{customOfferingId}}","buyerEmail":"buyer@test.com","amountMinor":6000}
+
+### 400 — custom offering below minimum (AmountBelowMinimumError)
+POST {{baseUrl}}/api/project/{{projectId}}/payments/orders
+Content-Type: application/json
+
+{"provider":"razorpay","offeringId":"{{customOfferingId}}","buyerEmail":"buyer@test.com","amountMinor":100}
+
+### 400 — confirm with fake signature
+POST {{baseUrl}}/api/project/{{projectId}}/payments/orders/{{startOrder.response.body.$.data.recordId}}/confirm
+Content-Type: application/json
+
+{"paymentId":"pay_fake","signature":"deadbeef"}
+
+### 200 — sync order
+GET {{baseUrl}}/api/project/{{projectId}}/payments/orders/{{startOrder.response.body.$.data.recordId}}
+
+### 200 — refresh order
+POST {{baseUrl}}/api/project/{{projectId}}/payments/orders/{{startOrder.response.body.$.data.recordId}}/refresh
