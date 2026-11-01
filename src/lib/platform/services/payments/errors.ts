@@ -33,6 +33,48 @@ export class NoPaymentProviderAvailableError extends Error {
   }
 }
 
+export class NoCreditRateForCurrencyError extends Error {
+  constructor(currency: string) {
+    super(`No credit rate configured for currency: ${currency}`);
+    this.name = 'NoCreditRateForCurrencyError';
+  }
+}
+
+export class CreditRateNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Credit rate not found: ${id}`);
+    this.name = 'CreditRateNotFoundError';
+  }
+}
+
+export class CreditRateExistsError extends Error {
+  constructor(currency: string) {
+    super(`A credit rate already exists for currency: ${currency}`);
+    this.name = 'CreditRateExistsError';
+  }
+}
+
+export class InvalidPlanPriceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidPlanPriceError';
+  }
+}
+
+export class PlanPriceExistsError extends Error {
+  constructor(planKey: string, interval: string, currency: string) {
+    super(`Plan price already exists: ${planKey} / ${interval} / ${currency}`);
+    this.name = 'PlanPriceExistsError';
+  }
+}
+
+export class PlanPriceInUseError extends Error {
+  constructor(id: string) {
+    super(`Plan price is in use and cannot be deleted: ${id}`);
+    this.name = 'PlanPriceInUseError';
+  }
+}
+
 export class PaymentNotStartedError extends Error {
   constructor(recordId: string) {
     super(`Payment has not been started for record: ${recordId}`);

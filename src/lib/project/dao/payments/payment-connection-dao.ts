@@ -12,6 +12,12 @@ const paymentConnectionSafeSelect = {
   displayHint: true,
   isEnabled: true,
   verifiedAt: true,
+  webhookRef: true,
+  webhookActive: true,
+  webhookRegisteredAt: true,
+  webhookError: true,
+  validationReport: true,
+  validatedAt: true,
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.PaymentConnectionSelect;
@@ -102,6 +108,20 @@ export class PaymentConnectionDAO {
     } catch (error) {
       throw new DatabaseException(error, 'payment connection');
     }
+  }
+
+  async existsForProject(projectId: string): Promise<boolean> {
+    const count = await this.prisma.paymentConnection.count({
+      where: { projectId },
+    });
+    return count > 0;
+  }
+
+  async listEnabledByProject(projectId: string): Promise<PaymentConnectionSafe[]> {
+    return await this.prisma.paymentConnection.findMany({
+      where: { projectId, isEnabled: true },
+      select: paymentConnectionSafeSelect,
+    });
   }
 
   async listByProject(projectId: string, options: PaymentConnectionListOptions = {}): Promise<PaginationResult<PaymentConnectionSafe>> {

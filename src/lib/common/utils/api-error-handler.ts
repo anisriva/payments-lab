@@ -28,6 +28,13 @@ const ERROR_STATUS_BY_NAME: Record<string, number> = {
   InvalidOfferingError: 400,
   OfferingNotPurchasableError: 400,
   AmountBelowMinimumError: 400,
+  ProviderSettingInvalidError: 400,
+  NoCreditRateForCurrencyError: 400,
+  InvalidPlanPriceError: 400,
+  CurrencyNotSupportedError: 400,
+  PaymentCapabilityNotSupportedError: 400,
+  InvalidCredentialsInputError: 400,
+  InvalidPaymentFlowError: 400,
 
   // 401 — unauthenticated
   UnauthenticatedError: 401,
@@ -64,6 +71,9 @@ const ERROR_STATUS_BY_NAME: Record<string, number> = {
   OfferingNotFoundError: 404,
   ProjectOrderNotFoundError: 404,
   ProjectSubscriptionNotFoundError: 404,
+  CountryNotFoundError: 404,
+  CreditRateNotFoundError: 404,
+  UnsupportedWebhookProviderError: 404,
 
   // 409 — conflict / duplicate
   ResourceExistsError: 409,
@@ -78,12 +88,18 @@ const ERROR_STATUS_BY_NAME: Record<string, number> = {
   PaymentNotStartedError: 409,
   GatewayNotConnectedError: 409,
   PaymentConnectionDisabledError: 409,
+  CreditRateExistsError: 409,
+  PlanPriceExistsError: 409,
+  PlanPriceInUseError: 409,
+  ProjectInUseError: 409,
+  OfferingInUseError: 409,
 
   // 502 — upstream provider failure
   PaymentProviderError: 502,
 
   // 422 — unprocessable input (client shows a typed problem card via `code`)
   CvImportError: 422,
+  PaymentRequestRejectedError: 422,
 
   // 503 — server-side configuration / unavailable
   AiFeatureUnavailableError: 503,

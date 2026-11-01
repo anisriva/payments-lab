@@ -7,25 +7,27 @@ import { log } from '@/lib/common/utils';
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ connectionId: string }> }
+  { params }: { params: Promise<{ provider: string }> }
 ): Promise<NextResponse> {
-  const { connectionId } = await params;
+  const { provider } = await params;
   const rawBody = await request.text();
   const headers = Object.fromEntries([...request.headers.entries()].map(([k, v]) => [k.toLowerCase(), v]));
   try {
     const service = new PaymentWebhookService(prisma);
-    await service.ingest({ provider: 'razorpay', connectionId, rawBody, headers });
+    await service.ingest({ provider, target: { kind: 'platform' }, rawBody, headers });
     return NextResponse.json({ received: true }, { status: 200 });
   } catch (error: unknown) {
-    log('POST /api/webhooks/razorpay/[connectionId] error', error, 'error');
-    if (error instanceof Error && error.name === 'InvalidPaymentSignatureError') {
-      return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
-    }
-    if (error instanceof Error && error.name === 'PaymentConnectionNotFoundError') {
-      return NextResponse.json({ error: 'Unknown connection' }, { status: 400 });
-    }
-    if (error instanceof Error && error.name === 'PaymentValidationError') {
-      return NextResponse.json({ received: true }, { status: 200 });
+    log('POST /api/webhooks/platform/[provider] error', error, 'error');
+    if (error instanceof Error) {
+      if (error.name === 'InvalidPaymentSignatureError') {
+        return NextResponse.json({ error: 'Invalid signature' }, { status: 400 });
+      }
+      if (error.name === 'UnsupportedWebhookProviderError') {
+        return NextResponse.json({ error: error.message }, { status: 404 });
+      }
+      if (error.name === 'PaymentValidationError') {
+        return NextResponse.json({ received: true }, { status: 200 });
+      }
     }
     return NextResponse.json({ error: 'Processing failed' }, { status: 500 });
   }

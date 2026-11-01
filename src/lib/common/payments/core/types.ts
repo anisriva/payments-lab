@@ -16,6 +16,8 @@ export interface ProviderCapabilities {
   flows: PaymentFlow[];
   receiverCountries: string[] | '*';
   payerCountries: string[] | '*';
+  currencies: string[] | '*';
+  enabled?: boolean; // undefined = enabled; set from Catalog by the service
   supportsSubscriptions: boolean;
   supportsCustomAmount: boolean;
 }
@@ -104,4 +106,66 @@ export interface NormalizedEvent {
   amount?: Money;
   subscriptionPeriod?: { start: Date; end: Date };
   occurredAt: Date;
+}
+
+export interface CredentialField {
+  key: string;          // property name inside the credentials object, e.g. 'keyId'
+  label: string;
+  secret: boolean;      // render as password, never echo back
+  placeholder?: string;
+  help?: string;
+}
+
+export interface OnboardingStep {
+  title: string;
+  body: string;
+  docsUrl?: string;
+}
+
+export type ValidationCheckKey =
+  | 'receiver_country' | 'key_mode' | 'keys_valid' | 'subscriptions_available' | 'webhook_registered';
+
+export interface ValidationCheckDef {
+  key: ValidationCheckKey;
+  label: string;
+  blocking: boolean; // true → a failure prevents saving
+}
+
+export interface ProviderProfile {
+  key: ProviderKey;
+  credentialFields: CredentialField[];
+  webhook: {
+    autoRegister: boolean;
+    canUpdate: boolean;
+    canDeactivate: boolean;
+    canDelete: boolean;
+    events: string[];                     // single source for the events we subscribe to
+    secretSource: 'generated' | 'manual'; // generated → server creates it, creator never sees it
+  };
+  catalog: { plansEditable: boolean; plansDeletable: boolean };
+  constraints: string[];
+  onboarding: OnboardingStep[];
+  validationChecks: ValidationCheckDef[]; // in execution order
+}
+
+export interface ProviderWebhook {
+  id: string;
+  url: string;
+  active: boolean;
+  events: string[];
+}
+
+export type CheckStatus = 'pass' | 'fail' | 'warn' | 'skipped';
+
+export interface ValidationCheckResult {
+  key: ValidationCheckKey;
+  label: string;
+  blocking: boolean;
+  status: CheckStatus;
+  detail: string;
+}
+
+export interface ValidationReport {
+  checks: ValidationCheckResult[];
+  canSave: boolean; // false when any blocking check failed
 }

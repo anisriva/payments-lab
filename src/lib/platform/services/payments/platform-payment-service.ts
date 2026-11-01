@@ -1,31 +1,42 @@
-import type { PrismaClient, AiCreditPurchase, Subscription } from '@/generated/prisma';
+import { randomUUID } from 'node:crypto';
+import type { PrismaClient, AiCreditPurchase, PlatformPlanPrice, Subscription } from '@/generated/prisma';
 import { PlatformPlanPriceDAO } from '@/lib/platform/dao/payments/platform-plan-price-dao';
 import { SubscriptionDAO } from '@/lib/platform/dao/payments/subscription-dao';
 import { AiCreditPurchaseDAO } from '@/lib/platform/dao/payments/ai-credit-purchase-dao';
+import { AiCreditRateDAO } from '@/lib/platform/dao/payments/ai-credit-rate-dao';
 import { PaymentDAO } from '@/lib/platform/dao/payments/payment-dao';
+import { ProviderProductDAO } from '@/lib/common/dao/payments/provider-product-dao';
 import { ProviderProductService } from '@/lib/common/services/payments/provider-product-service';
+import { ProviderSettingsService } from '@/lib/common/services/payments/provider-settings-service';
+import { CountryService } from '@/lib/common/services/catalog/country-service';
+import { UniqueConstraintException } from '@/lib/common/exceptions';
 import {
   CREDIT_QUICK_PICKS,
-  CREDIT_RATE_MINOR,
   MAX_CREDITS,
   MIN_CREDITS,
-  PLATFORM_CURRENCY,
   PLATFORM_RECEIVER_COUNTRY,
   SUBSCRIPTION_TOTAL_CYCLES,
   getPaymentEnvironment,
   getPlatformProvider,
 } from '@/lib/common/services/payments/payment-config';
 import { canMovePayment, canMoveSubscription } from '@/lib/common/services/payments/payment-transitions';
-import { getCapabilities, isProviderKey } from '@/lib/common/payments/core/factory';
+import { currencyAllowed, isProviderKey } from '@/lib/common/payments/core/factory';
 import { selectProvider } from '@/lib/common/payments/core/selector';
-import { InvalidPaymentSignatureError, ProviderNotImplementedError } from '@/lib/common/payments/core/errors';
+import { InvalidPaymentSignatureError, PaymentValidationError, ProviderNotImplementedError } from '@/lib/common/payments/core/errors';
 import type { CheckoutInstruction, CheckoutMode, NormalizedEvent, ProviderKey } from '@/lib/common/payments/core/types';
 import type { PaymentProvider } from '@/lib/common/payments/core/provider';
+import type { PaginationInput } from '@/types/common/pagination';
 import {
   CreditPurchaseNotFoundError,
+  CreditRateExistsError,
+  CreditRateNotFoundError,
   InvalidCreditAmountError,
+  InvalidPlanPriceError,
+  NoCreditRateForCurrencyError,
   NoPaymentProviderAvailableError,
   PaymentNotStartedError,
+  PlanPriceExistsError,
+  PlanPriceInUseError,
   PlanPriceNotFoundError,
   PlatformSubscriptionNotFoundError,
 } from './errors';
@@ -34,15 +45,23 @@ export class PlatformPaymentService {
   private planPriceDAO: PlatformPlanPriceDAO;
   private subscriptionDAO: SubscriptionDAO;
   private creditPurchaseDAO: AiCreditPurchaseDAO;
+  private creditRateDAO: AiCreditRateDAO;
   private paymentDAO: PaymentDAO;
+  private providerProductDAO: ProviderProductDAO;
   private providerProductService: ProviderProductService;
+  private providerSettingsService: ProviderSettingsService;
+  private countryService: CountryService;
 
   constructor(private readonly prisma: PrismaClient) {
     this.planPriceDAO = new PlatformPlanPriceDAO(prisma);
     this.subscriptionDAO = new SubscriptionDAO(prisma);
     this.creditPurchaseDAO = new AiCreditPurchaseDAO(prisma);
+    this.creditRateDAO = new AiCreditRateDAO(prisma);
     this.paymentDAO = new PaymentDAO(prisma);
+    this.providerProductDAO = new ProviderProductDAO(prisma);
     this.providerProductService = new ProviderProductService(prisma);
+    this.providerSettingsService = new ProviderSettingsService(prisma);
+    this.countryService = new CountryService(prisma);
   }
 
   async listPlanPrices() {
@@ -50,20 +69,149 @@ export class PlatformPaymentService {
     return result.data;
   }
 
-  async getSelectionPreview(payerCountry: string) {
+  async listPlanPricesForPayer(payerCountry: string) {
+    const country = await this.countryService.getCountry(payerCountry);
+    const result = await this.planPriceDAO.listActiveByCurrency(country.currencyCode);
+    return result.data;
+  }
+
+  async getCreditRateForPayer(payerCountry: string) {
+    const country = await this.countryService.getCountry(payerCountry);
+    return this.creditRateDAO.findActiveByCurrency(country.currencyCode);
+  }
+
+  async listPlanPricesForCatalog(options: { pagination?: PaginationInput } = {}) {
+    const result = await this.planPriceDAO.list({ pagination: options.pagination });
+    const products = await this.providerProductDAO.listByRefs(
+      'plan_price',
+      result.data.map((p) => p.id)
+    );
     return {
-      oneTime: selectProvider({
-        flow: 'platform',
-        mode: 'one_time',
-        payerCountry,
-        receiverCountry: PLATFORM_RECEIVER_COUNTRY,
-      }),
-      subscription: selectProvider({
-        flow: 'platform',
-        mode: 'subscription',
-        payerCountry,
-        receiverCountry: PLATFORM_RECEIVER_COUNTRY,
-      }),
+      ...result,
+      data: result.data.map((p) => ({
+        ...p,
+        providerRefs: products
+          .filter((r) => r.refId === p.id)
+          .map((r) => ({ provider: r.provider, providerRef: r.providerRef })),
+      })),
+    };
+  }
+
+  async listCreditRates(options: { pagination?: PaginationInput } = {}) {
+    return this.creditRateDAO.list({ pagination: options.pagination });
+  }
+
+  async createPlanPrice(input: {
+    planKey: string;
+    displayName: string;
+    interval: 'monthly' | 'yearly';
+    amountMinor: number;
+    currencyCode: string;
+  }): Promise<PlatformPlanPrice> {
+    // 1. Validate
+    if (!/^[a-z0-9-]+$/.test(input.planKey)) {
+      throw new InvalidPlanPriceError('planKey must be lowercase alphanumeric with dashes');
+    }
+    if (!Number.isInteger(input.amountMinor) || input.amountMinor < 100) {
+      throw new InvalidPlanPriceError('amountMinor must be an integer of at least 100');
+    }
+    if (!(await this.countryService.listCurrencies()).includes(input.currencyCode)) {
+      throw new InvalidPlanPriceError(`Unsupported currency: ${input.currencyCode}`);
+    }
+
+    const id = randomUUID();
+
+    // 2. Eager plan creation at every capable provider (external calls — outside any transaction)
+    const capabilities = await this.providerSettingsService.getEffectiveCapabilities('platform');
+    for (const caps of capabilities) {
+      if (!caps.implemented || caps.enabled === false || !caps.supportsSubscriptions) continue;
+      if (!currencyAllowed(caps.currencies, input.currencyCode)) continue;
+      await this.providerProductService.ensure({
+        scope: 'platform',
+        provider: caps.key,
+        environment: getPaymentEnvironment(),
+        refType: 'plan_price',
+        refId: id,
+        adapter: getPlatformProvider(caps.key),
+        product: {
+          name: input.displayName,
+          amount: { amountMinor: input.amountMinor, currency: input.currencyCode },
+          interval: input.interval,
+        },
+      });
+    }
+
+    // 3. Create the row with the explicit id
+    try {
+      return await this.planPriceDAO.create({ id, ...input, isActive: true });
+    } catch (e) {
+      if (e instanceof UniqueConstraintException) {
+        throw new PlanPriceExistsError(input.planKey, input.interval, input.currencyCode);
+      }
+      throw e;
+    }
+  }
+
+  async updatePlanPrice(
+    id: string,
+    data: { displayName?: string; isActive?: boolean }
+  ): Promise<PlatformPlanPrice> {
+    const planPrice = await this.planPriceDAO.findById(id);
+    if (!planPrice) throw new PlanPriceNotFoundError(id);
+    return this.planPriceDAO.update(id, data);
+  }
+
+  async deletePlanPrice(id: string): Promise<void> {
+    const planPrice = await this.planPriceDAO.findById(id);
+    if (!planPrice) throw new PlanPriceNotFoundError(id);
+    if (await this.subscriptionDAO.existsForPlanPrice(id)) {
+      throw new PlanPriceInUseError(id);
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await new ProviderProductDAO(tx).deleteByRef('plan_price', id);
+      await new PlatformPlanPriceDAO(tx).delete(id);
+    });
+  }
+
+  async createCreditRate(input: { currencyCode: string; rateMinor: number }) {
+    if (!(await this.countryService.listCurrencies()).includes(input.currencyCode)) {
+      throw new PaymentValidationError(`Unsupported currency: ${input.currencyCode}`);
+    }
+    if (!Number.isInteger(input.rateMinor) || input.rateMinor < 1) {
+      throw new PaymentValidationError('rateMinor must be an integer of at least 1');
+    }
+    try {
+      return await this.creditRateDAO.create({ ...input, isActive: true });
+    } catch (e) {
+      if (e instanceof UniqueConstraintException) {
+        throw new CreditRateExistsError(input.currencyCode);
+      }
+      throw e;
+    }
+  }
+
+  async updateCreditRate(id: string, data: { rateMinor?: number; isActive?: boolean }) {
+    if (data.rateMinor !== undefined && (!Number.isInteger(data.rateMinor) || data.rateMinor < 1)) {
+      throw new PaymentValidationError('rateMinor must be an integer of at least 1');
+    }
+    const rate = await this.creditRateDAO.findById(id);
+    if (!rate) throw new CreditRateNotFoundError(id);
+    return this.creditRateDAO.update(id, data);
+  }
+
+  async deleteCreditRate(id: string): Promise<void> {
+    const rate = await this.creditRateDAO.findById(id);
+    if (!rate) throw new CreditRateNotFoundError(id);
+    await this.creditRateDAO.delete(id);
+  }
+
+  async getSelectionPreview(payerCountry: string) {
+    const country = await this.countryService.getCountry(payerCountry);
+    const providers = await this.providerSettingsService.getEffectiveCapabilities('platform');
+    const base = { flow: 'platform' as const, payerCountry, receiverCountry: PLATFORM_RECEIVER_COUNTRY, currency: country.currencyCode };
+    return {
+      oneTime: selectProvider({ ...base, mode: 'one_time' }, providers),
+      subscription: selectProvider({ ...base, mode: 'subscription' }, providers),
     };
   }
 
@@ -79,31 +227,31 @@ export class PlatformPaymentService {
     return this.paymentDAO.list({ pagination: options.pagination, filters: { provider: options.provider } });
   }
 
-  private resolveProvider(
+  private async resolveProvider(
     gateway: ProviderKey | 'auto',
     payerCountry: string,
-    mode: CheckoutMode
-  ): { provider: ProviderKey; adapter: PaymentProvider; selectionReason?: string } {
-    if (gateway === 'auto') {
-      const result = selectProvider({
+    mode: CheckoutMode,
+    currency: string
+  ): Promise<{ provider: ProviderKey; adapter: PaymentProvider; selectionReason?: string }> {
+    if (gateway !== 'auto' && !isProviderKey(gateway)) {
+      throw new ProviderNotImplementedError(gateway);
+    }
+    const providers = await this.providerSettingsService.getEffectiveCapabilities('platform');
+    const result = selectProvider(
+      {
         flow: 'platform',
         mode,
         payerCountry,
         receiverCountry: PLATFORM_RECEIVER_COUNTRY,
-      });
-      if (result.provider === null) {
-        throw new NoPaymentProviderAvailableError(result.reason);
-      }
-      return { provider: result.provider, adapter: getPlatformProvider(result.provider), selectionReason: result.reason };
+        currency,
+        ...(gateway !== 'auto' && { allowed: [gateway as ProviderKey] }),
+      },
+      providers
+    );
+    if (result.provider === null) {
+      throw new NoPaymentProviderAvailableError(result.reason);
     }
-    if (!isProviderKey(gateway)) {
-      throw new ProviderNotImplementedError(gateway);
-    }
-    const caps = getCapabilities(gateway);
-    if (!caps.implemented || !caps.flows.includes('platform')) {
-      throw new ProviderNotImplementedError(gateway);
-    }
-    return { provider: gateway, adapter: getPlatformProvider(gateway) };
+    return { provider: result.provider, adapter: getPlatformProvider(result.provider), selectionReason: result.reason };
   }
 
   async startCreditPurchase(input: {
@@ -123,28 +271,33 @@ export class PlatformPaymentService {
       throw new InvalidCreditAmountError(credits);
     }
 
-    // 2. Resolve provider
-    const { provider, adapter, selectionReason } = this.resolveProvider(input.gateway as ProviderKey | 'auto', input.payerCountry, 'one_time');
+    // 2. Resolve currency and rate from the Catalog
+    const country = await this.countryService.getCountry(input.payerCountry);
+    const rate = await this.creditRateDAO.findActiveByCurrency(country.currencyCode);
+    if (!rate) throw new NoCreditRateForCurrencyError(country.currencyCode);
 
-    // 3. Compute amount
-    const amountMinor = credits * CREDIT_RATE_MINOR;
+    // 3. Resolve provider
+    const { provider, adapter, selectionReason } = await this.resolveProvider(input.gateway as ProviderKey | 'auto', input.payerCountry, 'one_time', country.currencyCode);
 
-    // 4. Create pending record
+    // 4. Compute amount
+    const amountMinor = credits * rate.rateMinor;
+
+    // 5. Create pending record
     const purchase = await this.creditPurchaseDAO.create({
       kind,
       credits,
       amountMinor,
-      currencyCode: PLATFORM_CURRENCY,
+      currencyCode: country.currencyCode,
       provider,
       environment: getPaymentEnvironment(),
       status: 'pending',
     });
 
-    // 5. Create provider checkout (outside any transaction)
+    // 6. Create provider checkout (outside any transaction)
     let checkout;
     try {
       checkout = await adapter.createOneTimeCheckout({
-        amount: { amountMinor, currency: PLATFORM_CURRENCY },
+        amount: { amountMinor, currency: country.currencyCode },
         description: `${credits} AI credits`,
         receipt: purchase.id,
         notes: { flow: 'platform', recordId: purchase.id },
@@ -157,7 +310,7 @@ export class PlatformPaymentService {
       throw e;
     }
 
-    // 6. Save provider ref and return
+    // 7. Save provider ref and return
     await this.creditPurchaseDAO.update(purchase.id, { providerOrderId: checkout.providerRef });
     return { recordId: purchase.id, provider, selectionReason, instruction: checkout.instruction };
   }
@@ -174,7 +327,7 @@ export class PlatformPaymentService {
     }
 
     // 2. Resolve provider
-    const { provider, adapter, selectionReason } = this.resolveProvider(input.gateway as ProviderKey | 'auto', input.payerCountry, 'subscription');
+    const { provider, adapter, selectionReason } = await this.resolveProvider(input.gateway as ProviderKey | 'auto', input.payerCountry, 'subscription', planPrice.currencyCode);
 
     // 3. Ensure provider product (plan)
     const productRef = await this.providerProductService.ensure({

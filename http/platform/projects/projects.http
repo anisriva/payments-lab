@@ -21,3 +21,30 @@ POST {{baseUrl}}/api/platform/projects
 Content-Type: application/json
 
 {"name":"Step 6 Test US Project","countryCode":"US"}
+### 200 — rename a project
+# @name updateProject
+PATCH {{baseUrl}}/api/platform/projects/{{createProject.response.body.$.data.id}}
+Content-Type: application/json
+
+{"name":"Step 6 Test Project Renamed"}
+
+### 409 — change country when project has offerings (acceptance 11: ProjectInUseError)
+# Fill the id of a project that has offerings, e.g. Asha's Studio
+@projectWithOfferingsId = 47c04a58-0c69-4927-93c9-28f612db1c46
+PATCH {{baseUrl}}/api/platform/projects/{{projectWithOfferingsId}}
+Content-Type: application/json
+
+{"countryCode":"US"}
+
+### 409 — delete a project with payment data (acceptance 11: ProjectInUseError)
+DELETE {{baseUrl}}/api/platform/projects/{{projectWithOfferingsId}}
+
+### 201 — create a throwaway project (acceptance 11)
+# @name createThrowaway
+POST {{baseUrl}}/api/platform/projects
+Content-Type: application/json
+
+{"name":"Throwaway Project","countryCode":"IN"}
+
+### 200 — delete the throwaway project (acceptance 11)
+DELETE {{baseUrl}}/api/platform/projects/{{createThrowaway.response.body.$.data.id}}

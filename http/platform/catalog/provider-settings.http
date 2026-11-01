@@ -1,0 +1,44 @@
+@baseUrl = http://localhost:3000
+
+### 200 — widen Razorpay rules (acceptance 7)
+# Enables the US-payer credit purchase experiment in credit-purchases.http
+PATCH {{baseUrl}}/api/platform/catalog/provider-settings/razorpay
+Content-Type: application/json
+
+{"payerCountries":["IN","US"],"currencies":["INR","USD"]}
+
+### 200 — widen receiver countries (acceptance 12: US project can now connect)
+PATCH {{baseUrl}}/api/platform/catalog/provider-settings/razorpay
+Content-Type: application/json
+
+{"receiverCountries":["IN","US"]}
+
+### 404 — unknown country code (acceptance 8: CountryNotFoundError)
+PATCH {{baseUrl}}/api/platform/catalog/provider-settings/razorpay
+Content-Type: application/json
+
+{"payerCountries":["IN","XX"]}
+
+### 400 — currency not in catalog (acceptance 8: ProviderSettingInvalidError — JPY has no country)
+PATCH {{baseUrl}}/api/platform/catalog/provider-settings/razorpay
+Content-Type: application/json
+
+{"currencies":["INR","JPY"]}
+
+### 200 — wildcard payer countries
+PATCH {{baseUrl}}/api/platform/catalog/provider-settings/razorpay
+Content-Type: application/json
+
+{"payerCountries":["*"]}
+
+### 200 — restore lab defaults
+PATCH {{baseUrl}}/api/platform/catalog/provider-settings/razorpay
+Content-Type: application/json
+
+{"isEnabled":true,"receiverCountries":["IN"],"payerCountries":["IN"],"currencies":["INR"]}
+
+### 400 — not-implemented provider (ProviderNotImplementedError)
+PATCH {{baseUrl}}/api/platform/catalog/provider-settings/dodo
+Content-Type: application/json
+
+{"isEnabled":true}

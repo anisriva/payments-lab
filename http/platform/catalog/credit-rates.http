@@ -1,0 +1,35 @@
+@baseUrl = http://localhost:3000
+
+### 201 — create a credit rate
+# @name createGbpRate
+POST {{baseUrl}}/api/platform/catalog/credit-rates
+Content-Type: application/json
+
+{"currencyCode":"GBP","rateMinor":80}
+
+### 409 — duplicate currency (CreditRateExistsError)
+POST {{baseUrl}}/api/platform/catalog/credit-rates
+Content-Type: application/json
+
+{"currencyCode":"INR","rateMinor":60}
+
+### 400 — currency not in catalog (JPY — PaymentValidationError)
+POST {{baseUrl}}/api/platform/catalog/credit-rates
+Content-Type: application/json
+
+{"currencyCode":"JPY","rateMinor":100}
+
+### 200 — update rate
+PATCH {{baseUrl}}/api/platform/catalog/credit-rates/{{createGbpRate.response.body.$.data.id}}
+Content-Type: application/json
+
+{"rateMinor":90}
+
+### 200 — deactivate a rate (after this, credit purchase for that payer currency → NoCreditRateForCurrencyError)
+PATCH {{baseUrl}}/api/platform/catalog/credit-rates/{{createGbpRate.response.body.$.data.id}}
+Content-Type: application/json
+
+{"isActive":false}
+
+### 200 — delete
+DELETE {{baseUrl}}/api/platform/catalog/credit-rates/{{createGbpRate.response.body.$.data.id}}

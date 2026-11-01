@@ -19,6 +19,16 @@ export class InvalidPaymentSignatureError extends Error {
   }
 }
 
+export class PaymentRequestRejectedError extends Error {
+  public readonly provider: string;
+
+  constructor(provider: string, message: string) {
+    super(`${provider} rejected the request: ${message}`);
+    this.name = 'PaymentRequestRejectedError';
+    this.provider = provider;
+  }
+}
+
 export class PaymentProviderError extends Error {
   public readonly provider: string;
   public readonly cause?: unknown;
@@ -28,5 +38,12 @@ export class PaymentProviderError extends Error {
     this.name = 'PaymentProviderError';
     this.provider = provider;
     this.cause = cause;
+  }
+}
+
+export class PaymentCapabilityNotSupportedError extends Error {
+  constructor(provider: string, capability: string) {
+    super(`${provider} does not support ${capability}`);
+    this.name = 'PaymentCapabilityNotSupportedError';
   }
 }

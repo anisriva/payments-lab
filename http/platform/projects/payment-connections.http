@@ -32,3 +32,25 @@ Content-Type: application/json
 ### 200 — disconnect
 # MCP check: SELECT is_enabled FROM payment_connections ORDER BY created_at DESC LIMIT 1;
 DELETE {{baseUrl}}/api/platform/projects/{{projectId}}/payments/connections/{{connectRazorpay.response.body.$.data.id}}
+
+### 200 — wrong keys → saved:false, keys_valid fail
+POST {{baseUrl}}/api/platform/projects/{{projectId}}/payments/connections
+Content-Type: application/json
+
+{"provider":"razorpay","credentials":{"keyId":"rzp_test_wrong","keySecret":"bad"}}
+
+### 200 — rzp_live_ key in test mode → saved:false, key_mode fail
+POST {{baseUrl}}/api/platform/projects/{{projectId}}/payments/connections
+Content-Type: application/json
+
+{"provider":"razorpay","credentials":{"keyId":"rzp_live_ABCDEFGH","keySecret":"bad"}}
+
+### 200 — creator keys → saved:true (webhook_registered warn on localhost)
+# @name connectRazorpay
+POST {{baseUrl}}/api/platform/projects/{{projectId}}/payments/connections
+Content-Type: application/json
+
+{"provider":"razorpay","credentials":{"keyId":"{{razorpayKeyId}}","keySecret":"{{razorpayKeySecret}}"}}
+
+### 200 — revalidate
+POST {{baseUrl}}/api/platform/projects/{{projectId}}/payments/connections/{{connectRazorpay.response.body.$.data.connection.id}}/revalidate

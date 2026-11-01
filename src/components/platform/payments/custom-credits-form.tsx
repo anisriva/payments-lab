@@ -5,14 +5,14 @@ import { creditPurchaseCreateSchema, type CreditPurchaseCreate } from '@/schemas
 import { useCheckoutFlow } from '@/hooks/common/payments/use-checkout-flow';
 import { useStartCreditPurchase } from '@/hooks/platform/payments/use-start-credit-purchase';
 import { useConfirmCreditPurchase } from '@/hooks/platform/payments/use-confirm-credit-purchase';
-import { CREDIT_RATE_MINOR, MIN_CREDITS, MAX_CREDITS } from '@/lib/common/services/payments/payment-constants';
+import { MIN_CREDITS, MAX_CREDITS } from '@/lib/common/services/payments/payment-constants';
 import { formatMoney } from '@/lib/common/helpers/money';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 
-export function CustomCreditsForm({ gateway, payer }: { gateway: string; payer: string }) {
+export function CustomCreditsForm({ gateway, payer, rateMinor, currencyCode }: { gateway: string; payer: string; rateMinor: number; currencyCode: string }) {
   const start = useStartCreditPurchase();
   const confirm = useConfirmCreditPurchase();
   const flow = useCheckoutFlow();
@@ -48,7 +48,7 @@ export function CustomCreditsForm({ gateway, payer }: { gateway: string; payer: 
             )} />
             <div>
               <p className="text-2xl font-semibold">
-                {Number.isInteger(credits) ? formatMoney(credits * CREDIT_RATE_MINOR, 'INR') : '—'}
+                {Number.isInteger(credits) ? formatMoney(credits * rateMinor, currencyCode) : '—'}
               </p>
               <p className="text-sm text-muted-foreground">≈ {Number.isInteger(credits) ? credits : 0} credits</p>
             </div>

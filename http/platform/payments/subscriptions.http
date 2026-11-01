@@ -13,6 +13,10 @@ Content-Type: application/json
 # MCP check: SELECT status FROM subscriptions ORDER BY created_at DESC LIMIT 1;
 GET {{baseUrl}}/api/platform/payments/subscriptions/{{startSubscription.response.body.$.data.recordId}}
 
+### 200 — list all subscriptions
+# MCP check: SELECT status, provider_subscription_id FROM subscriptions ORDER BY created_at DESC LIMIT 10;
+GET {{baseUrl}}/api/platform/payments/subscriptions
+
 ### 400 — confirm with fake signature (InvalidPaymentSignatureError)
 POST {{baseUrl}}/api/platform/payments/subscriptions/{{startSubscription.response.body.$.data.recordId}}/confirm
 Content-Type: application/json

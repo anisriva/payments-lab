@@ -5,6 +5,11 @@ export interface ProjectCreateInput {
   countryCode: string;
 }
 
+export interface ProjectUpdateInput {
+  name?: string;
+  countryCode?: string;
+}
+
 export interface ProjectListOptions {
   pagination?: PaginationInput;
   sort?: SortOptions;

@@ -51,6 +51,20 @@ export class ProjectSubscriptionDAO {
     }
   }
 
+  async existsForOffering(offeringId: string): Promise<boolean> {
+    const count = await this.prisma.projectSubscription.count({
+      where: { offeringId },
+    });
+    return count > 0;
+  }
+
+  async existsForProject(projectId: string): Promise<boolean> {
+    const count = await this.prisma.projectSubscription.count({
+      where: { projectId },
+    });
+    return count > 0;
+  }
+
   async list(options: ProjectSubscriptionListOptions): Promise<PaginationResult<ProjectSubscriptionWithOffering>> {
     const { pagination, sort, filters } = options;
 

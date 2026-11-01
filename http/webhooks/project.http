@@ -1,0 +1,31 @@
+@baseUrl = http://localhost:3000
+# Fill: SELECT id FROM projects ORDER BY created_at DESC LIMIT 1;
+@projectId = 47c04a58-0c69-4927-93c9-28f612db1c46
+# Fill a project with NO razorpay connection: SELECT id FROM projects WHERE id NOT IN (SELECT project_id FROM payment_connections) LIMIT 1;
+@unconnectedProjectId = 00000000-0000-0000-0000-000000000000
+
+### 404 — unknown project
+POST {{baseUrl}}/api/webhooks/project/00000000-0000-0000-0000-000000000000/razorpay
+Content-Type: application/json
+
+{}
+
+### 404 — project without a razorpay connection
+POST {{baseUrl}}/api/webhooks/project/{{unconnectedProjectId}}/razorpay
+Content-Type: application/json
+
+{}
+
+### 404 — stripe is not a project provider adapter
+POST {{baseUrl}}/api/webhooks/project/{{projectId}}/stripe
+Content-Type: application/json
+
+{}
+
+### 400 — fake signature (project with razorpay connected)
+POST {{baseUrl}}/api/webhooks/project/{{projectId}}/razorpay
+Content-Type: application/json
+X-Razorpay-Signature: deadbeef
+X-Razorpay-Event-Id: evt_fake
+
+{"event":"payment.captured","payload":{}}

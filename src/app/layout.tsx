@@ -43,7 +43,6 @@ export default function RootLayout({
                 items={[
                   { href: '/platform', label: 'Platform' },
                   { href: '/byop', label: 'BYOP' },
-                  { href: '/events', label: 'Events' },
                 ]}
               />
             </div>

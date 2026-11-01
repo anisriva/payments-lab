@@ -6,10 +6,10 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useCheckoutFlow } from '@/hooks/common/payments/use-checkout-flow';
 import { useStartCreditPurchase } from '@/hooks/platform/payments/use-start-credit-purchase';
 import { useConfirmCreditPurchase } from '@/hooks/platform/payments/use-confirm-credit-purchase';
-import { CREDIT_QUICK_PICKS, CREDIT_RATE_MINOR } from '@/lib/common/services/payments/payment-constants';
+import { CREDIT_QUICK_PICKS } from '@/lib/common/services/payments/payment-constants';
 import { formatMoney } from '@/lib/common/helpers/money';
 
-export function FixedCreditsCard({ gateway, payer }: { gateway: string; payer: string }) {
+export function FixedCreditsCard({ gateway, payer, rateMinor, currencyCode }: { gateway: string; payer: string; rateMinor: number; currencyCode: string }) {
   const [credits, setCredits] = useState<number>(CREDIT_QUICK_PICKS[0]);
   const start = useStartCreditPurchase();
   const confirm = useConfirmCreditPurchase();
@@ -18,7 +18,7 @@ export function FixedCreditsCard({ gateway, payer }: { gateway: string; payer: s
     <Card>
       <CardHeader>
         <CardTitle>Quick purchase</CardTitle>
-        <CardDescription>Buy a preset credit pack at ₹{(CREDIT_RATE_MINOR / 100).toFixed(2)}/credit</CardDescription>
+        <CardDescription>Buy a preset credit pack at {formatMoney(rateMinor, currencyCode)}/credit</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <ToggleGroup value={[String(credits)]} onValueChange={(v) => v.length > 0 && setCredits(Number(v[0]))}>
@@ -27,7 +27,7 @@ export function FixedCreditsCard({ gateway, payer }: { gateway: string; payer: s
           ))}
         </ToggleGroup>
         <div>
-          <p className="text-2xl font-semibold">{formatMoney(credits * CREDIT_RATE_MINOR, 'INR')}</p>
+          <p className="text-2xl font-semibold">{formatMoney(credits * rateMinor, currencyCode)}</p>
           <p className="text-sm text-muted-foreground">≈ {credits} credits</p>
         </div>
       </CardContent>

@@ -2,7 +2,7 @@ import { paginate, PrismaTransaction } from '@/lib/common/dao';
 import { PaginationResult } from '@/types/common/pagination';
 import { DatabaseException } from '@/lib/common/exceptions';
 import type { PrismaClient, Project, Prisma } from '@/generated/prisma';
-import type { ProjectCreateInput, ProjectListOptions } from './types';
+import type { ProjectCreateInput, ProjectUpdateInput, ProjectListOptions } from './types';
 
 export class ProjectDAO {
   constructor(private prisma: PrismaClient | PrismaTransaction) {}
@@ -23,6 +23,27 @@ export class ProjectDAO {
     try {
       return await this.prisma.project.create({
         data,
+      });
+    } catch (error) {
+      throw new DatabaseException(error, 'project');
+    }
+  }
+
+  async update(id: string, data: ProjectUpdateInput): Promise<Project> {
+    try {
+      return await this.prisma.project.update({
+        where: { id },
+        data,
+      });
+    } catch (error) {
+      throw new DatabaseException(error, 'project');
+    }
+  }
+
+  async delete(id: string): Promise<Project> {
+    try {
+      return await this.prisma.project.delete({
+        where: { id },
       });
     } catch (error) {
       throw new DatabaseException(error, 'project');

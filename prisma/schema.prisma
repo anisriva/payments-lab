@@ -14,6 +14,11 @@ enum PaymentProvider {
   paypal
 }
 
+enum PaymentFlow {
+  platform
+  project
+}
+
 enum PaymentEnvironment {
   test
   live
@@ -187,6 +192,12 @@ model PaymentConnection {
   displayHint    String             @map("display_hint") @db.VarChar(64)
   isEnabled      Boolean            @default(true) @map("is_enabled")
   verifiedAt     DateTime?          @map("verified_at")
+  webhookRef          String?         @map("webhook_ref")
+  webhookActive       Boolean?        @map("webhook_active")
+  webhookRegisteredAt DateTime?       @map("webhook_registered_at")
+  webhookError        String?         @map("webhook_error")
+  validationReport    Json?           @map("validation_report")
+  validatedAt         DateTime?       @map("validated_at")
   createdAt      DateTime           @default(now()) @map("created_at")
   updatedAt      DateTime           @updatedAt @map("updated_at")
 
@@ -290,4 +301,48 @@ model ProviderEvent {
   @@unique([provider, scope, providerEventId])
   @@index([receivedAt])
   @@map("provider_events")
+}
+
+// ───────────── Catalog ─────────────
+
+// LAB-ONLY stand-in for Folio's Country catalog (static seed).
+model Country {
+  code         String @id @db.Char(2)
+  name         String @db.VarChar(100)
+  currencyCode String @map("currency_code") @db.Char(3)
+
+  @@map("countries")
+}
+
+// Business rules per provider, editable in Catalog.
+// '*' as the only array element means "any".
+model PaymentProviderSetting {
+  provider            PaymentProvider
+  flow                PaymentFlow     @default(platform)
+  isEnabled           Boolean         @default(true) @map("is_enabled")
+  receiverCountries   String[]        @map("receiver_countries")
+  payerCountries      String[]        @map("payer_countries")
+  currencies          String[]
+  // platform flow only:
+  webhookRef          String?         @map("webhook_ref")
+  webhookRegisteredAt DateTime?       @map("webhook_registered_at")
+  webhookError        String?         @map("webhook_error")
+  validationReport    Json?           @map("validation_report")
+  validatedAt         DateTime?       @map("validated_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+
+  @@id([provider, flow])
+  @@map("payment_provider_settings")
+}
+
+// Price of one AI credit per currency (Folio: credit prices per market).
+model AiCreditRate {
+  id           String   @id @default(uuid())
+  currencyCode String   @unique @map("currency_code") @db.Char(3)
+  rateMinor    Int      @map("rate_minor")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("ai_credit_rates")
 }

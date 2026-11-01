@@ -1,6 +1,6 @@
 @baseUrl = http://localhost:3000
 # Fill from: SELECT id FROM projects ORDER BY created_at DESC LIMIT 1;
-@projectId = 00000000-0000-0000-0000-000000000000
+@projectId = 47c04a58-0c69-4927-93c9-28f612db1c46
 
 ### 201 — create a fixed offering
 # MCP check: SELECT name, price_type, amount_minor FROM project_offerings ORDER BY created_at DESC LIMIT 1;
@@ -28,3 +28,33 @@ POST {{baseUrl}}/api/platform/projects/{{projectId}}/payments/offerings
 Content-Type: application/json
 
 {"name":"Bad plan","priceType":"recurring","amountMinor":100000}
+
+### 201 — recurring offering while connected → eager plan (acceptance 9)
+# MCP check: SELECT scope, ref_type, provider_ref FROM provider_products WHERE ref_type = 'offering' ORDER BY created_at DESC LIMIT 1;
+# The plan should appear immediately in the CREATOR's Razorpay dashboard.
+# @name createConnectedRecurring
+POST {{baseUrl}}/api/platform/projects/{{projectId}}/payments/offerings
+Content-Type: application/json
+
+{"name":"Quarterly retainer","priceType":"recurring","amountMinor":250000,"interval":"monthly"}
+
+### 200 — rename / deactivate an offering
+PATCH {{baseUrl}}/api/platform/projects/{{projectId}}/payments/offerings/{{createOffering.response.body.$.data.id}}
+Content-Type: application/json
+
+{"name":"Portrait session (updated)","isActive":false}
+
+### 409 — delete an offering that has orders (acceptance 10: OfferingInUseError)
+# Fill an offering id referenced by project_orders: SELECT offering_id FROM project_orders LIMIT 1;
+@offeringWithOrdersId = 00000000-0000-0000-0000-000000000000
+DELETE {{baseUrl}}/api/platform/projects/{{projectId}}/payments/offerings/{{offeringWithOrdersId}}
+
+### 200 — delete a fresh unused offering (acceptance 10)
+# MCP check: provider_products rows for this ref_id are gone
+# @name createDeletable
+POST {{baseUrl}}/api/platform/projects/{{projectId}}/payments/offerings
+Content-Type: application/json
+
+{"name":"Deletable","priceType":"fixed","amountMinor":1000}
+###
+DELETE {{baseUrl}}/api/platform/projects/{{projectId}}/payments/offerings/{{createDeletable.response.body.$.data.id}}

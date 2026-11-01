@@ -18,6 +18,40 @@ export interface PlatformPlanPriceCreateInput {
   isActive?: boolean;
 }
 
+export interface PlatformPlanPriceUpdateInput {
+  displayName?: string;
+  isActive?: boolean;
+}
+
+export interface PlatformPlanPriceListOptions {
+  pagination?: PaginationInput;
+  sort?: SortOptions;
+  filters?: {
+    isActive?: boolean;
+    currencyCode?: string;
+  };
+}
+
+export interface AiCreditRateCreateInput {
+  currencyCode: string;
+  rateMinor: number;
+  isActive?: boolean;
+}
+
+export interface AiCreditRateUpdateInput {
+  rateMinor?: number;
+  isActive?: boolean;
+}
+
+export interface AiCreditRateListOptions {
+  pagination?: PaginationInput;
+  sort?: SortOptions;
+  filters?: {
+    currencyCode?: string;
+    isActive?: boolean;
+  };
+}
+
 export interface SubscriptionCreateInput {
   platformPlanPriceId: string;
   provider: PaymentProvider;
