@@ -3,7 +3,7 @@ import { ProjectDAO } from '@/lib/platform/dao/projects/project-dao';
 import { ProjectOfferingDAO } from '@/lib/project/dao/payments/project-offering-dao';
 import { ProjectOrderDAO } from '@/lib/project/dao/payments/project-order-dao';
 import { ProjectSubscriptionDAO } from '@/lib/project/dao/payments/project-subscription-dao';
-import { PaymentConnectionDAO } from '@/lib/project/dao/payments/payment-connection-dao';
+import { ProjectPaymentConnectionDAO } from '@/lib/project/dao/payments/project-payment-connection-dao';
 import { CountryService } from '@/lib/common/services/catalog/country-service';
 import { UniqueConstraintException } from '@/lib/common/exceptions';
 import type { PaginationInput } from '@/types/common/pagination';
@@ -15,7 +15,7 @@ export class ProjectService {
   private offeringDAO: ProjectOfferingDAO;
   private orderDAO: ProjectOrderDAO;
   private projectSubscriptionDAO: ProjectSubscriptionDAO;
-  private connectionDAO: PaymentConnectionDAO;
+  private connectionDAO: ProjectPaymentConnectionDAO;
   private countryService: CountryService;
 
   constructor(private readonly prisma: PrismaClient) {
@@ -23,7 +23,7 @@ export class ProjectService {
     this.offeringDAO = new ProjectOfferingDAO(prisma);
     this.orderDAO = new ProjectOrderDAO(prisma);
     this.projectSubscriptionDAO = new ProjectSubscriptionDAO(prisma);
-    this.connectionDAO = new PaymentConnectionDAO(prisma);
+    this.connectionDAO = new ProjectPaymentConnectionDAO(prisma);
     this.countryService = new CountryService(prisma);
   }
 

@@ -5,9 +5,11 @@ import Link from 'next/link';
 import { prisma } from '@/lib/common/connectors/prisma';
 import { ProjectService } from '@/lib/platform/services/projects/project-service';
 import { CountryService } from '@/lib/common/services/catalog/country-service';
-import { PaymentConnectionService } from '@/lib/project/services/payments/payment-connection-service';
+import { ProjectPaymentConnectionService } from '@/lib/project/services/payments/project-payment-connection-service';
 import { ProjectPaymentService } from '@/lib/project/services/payments/project-payment-service';
-import { listProviders, countryAllowed } from '@/lib/common/payments/core/factory';
+import { getManifest, listManifests } from '@/lib/common/payments/core/registry.server';
+import { supports } from '@/lib/common/payments/core/contracts/features';
+import { countryAllowed, coveredValues } from '@/lib/common/payments/core/coverage';
 import { parsePositivePage } from '@/lib/common/helpers/url-parsers';
 import { formatMoney } from '@/lib/common/helpers/money';
 import { buttonVariants } from '@/components/ui/button';
@@ -23,7 +25,8 @@ import { ProjectSelect } from '@/components/platform/projects/project-select';
 import { ProjectCard } from '@/components/platform/projects/project-card';
 import { OfferingActiveSwitch, OfferingActions } from '@/components/platform/projects/offering-actions';
 import { ConnectGatewayForm } from '@/components/platform/projects/connect-gateway-form';
-import { getProfile, isProviderKey } from '@/lib/common/payments/core/factory';
+import { isProviderKey } from '@/lib/common/payments/core/registry.server';
+import { getClientAdapter } from '@/lib/common/payments/core/registry.client';
 import { CreateOfferingForm } from '@/components/platform/projects/create-offering-form';
 import { RevalidateButton, DisconnectDialogButton } from '@/components/platform/projects/connection-actions';
 import { ValidationChecklist } from '@/components/common/payments/validation-checklist';
@@ -48,7 +51,7 @@ export default async function ByopGatewayPage({
   if (!VIEWS.includes(view as (typeof VIEWS)[number])) notFound();
 
   const projectService = new ProjectService(prisma);
-  const connectionService = new PaymentConnectionService(prisma);
+  const connectionService = new ProjectPaymentConnectionService(prisma);
   const paymentService = new ProjectPaymentService(prisma);
 
   const countryService = new CountryService(prisma);
@@ -64,8 +67,15 @@ export default async function ByopGatewayPage({
   const opage = parsePositivePage(query.opage);
   const spage = parsePositivePage(query.spage);
 
-  const providers = listProviders('project');
-  const caps = providers.find((p) => p.key === gateway);
+  const PROVIDER_LABELS: Record<string, string> = { dodo: 'Dodo Payments', stripe: 'Stripe', paypal: 'PayPal' };
+  const manifests = listManifests('project');
+  const providers = manifests.map((m) => ({ key: m.key, label: m.brand.name, implemented: true as const, manifest: m }));
+  const manifest = manifests.find((m) => m.key === gateway);
+  const caps = manifest
+    ? { key: manifest.key, label: manifest.brand.name, implemented: true, manifest }
+    : isProviderKey(gateway)
+      ? { key: gateway, label: PROVIDER_LABELS[gateway] ?? gateway, implemented: false, manifest: null }
+      : null;
   if (!caps) notFound();
 
   const href = (v: string) => `/byop/projects/${projectId}/${gateway}/${v}?buyer=${encodeURIComponent(buyer)}`;
@@ -73,8 +83,8 @@ export default async function ByopGatewayPage({
   const connection = caps.implemented ? await connectionService.getForProject(projectId, gateway) : null;
   const webhookUrl = `${getAppBaseUrl()}/api/webhooks/project/${projectId}/${gateway}`;
 
-  const supported = countryAllowed(caps.receiverCountries, project.countryCode);
-  type OfferingRow = ProjectOffering & { providerRefs?: { scope: string; provider: string; providerRef: string }[] };
+  const supported = caps.manifest ? countryAllowed(coveredValues(caps.manifest).receivers, project.countryCode) : false;
+  type OfferingRow = ProjectOffering & { prices?: import('@/generated/prisma').ProjectOfferingPrice[]; providerRefs?: { scope: string; provider: string; providerRef: string }[] };
   const [offerings, orders, subscriptions]: [
     PaginationResult<OfferingRow>,
     Awaited<ReturnType<typeof paymentService.listOrders>>,
@@ -134,7 +144,7 @@ export default async function ByopGatewayPage({
         </Alert>
       ) : view === 'setup' ? (
         <div className="space-y-6">
-          <ProjectCard project={project} countries={countries} />
+          <ProjectCard project={project} countries={countries.map((c) => ({ code: c.countryCode, name: c.name }))} />
           <Card>
             <CardHeader>
               <CardTitle>{caps.label} connection</CardTitle>
@@ -165,12 +175,12 @@ export default async function ByopGatewayPage({
                   {connection.validationReport != null && (
                     <div className="space-y-1">
                       <p className="text-sm font-medium">Last validation{connection.validatedAt ? ` · ${connection.validatedAt.toLocaleString()}` : ''}</p>
-                      <ValidationChecklist report={connection.validationReport as unknown as import('@/lib/common/payments/core/types').ValidationReport} />
+                      <ValidationChecklist report={connection.validationReport as unknown as import('@/lib/common/payments/core/connection-checks').ValidationReport} />
                     </div>
                   )}
                 </div>
-              ) : isProviderKey(gateway) && getProfile(gateway) ? (
-                <ConnectGatewayForm projectId={projectId} provider={gateway} profile={getProfile(gateway as import('@/lib/common/payments/core/types').ProviderKey)!} webhookUrl={webhookUrl} />
+              ) : isProviderKey(gateway) ? (
+                <ConnectGatewayForm projectId={projectId} provider={gateway} adapter={getClientAdapter(gateway)} webhookUrl={webhookUrl} />
               ) : (
                 <Alert><AlertTitle>Not implemented yet</AlertTitle></Alert>
               )}
@@ -189,13 +199,13 @@ export default async function ByopGatewayPage({
                   {offerings.data.map((o) => (
                     <TableRow key={o.id}>
                       <TableCell>{o.name}</TableCell>
-                      <TableCell>{o.priceType}</TableCell>
+                      <TableCell>{o.prices?.[0]?.priceType ?? '—'}</TableCell>
                       <TableCell>
-                        {o.priceType === 'custom' ? `min ${formatMoney(o.amountMinor, o.currencyCode)}`
-                          : o.priceType === 'recurring' ? `${formatMoney(o.amountMinor, o.currencyCode)} / ${o.interval}`
-                          : formatMoney(o.amountMinor, o.currencyCode)}
+                        {o.prices?.[0] ? (o.prices[0].priceType === 'custom' ? `min ${formatMoney(o.prices[0].amount, o.prices[0].currencyCode)}`
+                          : o.prices[0].priceType === 'recurring' ? `${formatMoney(o.prices[0].amount, o.prices[0].currencyCode)} / ${o.prices[0].billingMode}`
+                          : formatMoney(o.prices[0].amount, o.prices[0].currencyCode)) : '—'}
                       </TableCell>
-                      <TableCell>{o.currencyCode}</TableCell>
+                      <TableCell>{o.prices?.[0]?.currencyCode ?? projectCurrency}</TableCell>
                       <TableCell>
                         {o.providerRefs && o.providerRefs.length > 0
                           ? o.providerRefs.map((r) => (
@@ -207,7 +217,7 @@ export default async function ByopGatewayPage({
                           : <span className="text-muted-foreground">—</span>}
                       </TableCell>
                       <TableCell><OfferingActiveSwitch projectId={projectId} offeringId={o.id} checked={o.isActive} /></TableCell>
-                      <TableCell><OfferingActions projectId={projectId} offeringId={o.id} name={o.name} /></TableCell>
+                      <TableCell><OfferingActions projectId={projectId} offeringId={o.id} name={o.name} providerKeys={[...new Set((o.providerRefs ?? []).map((r) => r.provider))]} /></TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -223,7 +233,7 @@ export default async function ByopGatewayPage({
           ) : (
             <div className="grid gap-6 md:grid-cols-3">
               {offerings.data.filter((o) => o.isActive).map((o) => (
-                <OfferingCard key={o.id} projectId={projectId} offering={o} buyer={buyer} />
+                <OfferingCard key={o.id} projectId={projectId} offering={o} buyer={buyer} provider={gateway} />
               ))}
             </div>
           )}
@@ -236,10 +246,10 @@ export default async function ByopGatewayPage({
                   {subscriptions.data.length === 0 && <TableRow><TableCell colSpan={4} className="text-muted-foreground">No records yet</TableCell></TableRow>}
                   {subscriptions.data.map((s) => (
                     <TableRow key={s.id}>
-                      <TableCell>{s.offering.name}</TableCell>
+                      <TableCell>{s.projectOfferingPrice.offering.name}</TableCell>
                       <TableCell><StatusBadge status={s.status} /></TableCell>
                       <TableCell>{s.currentPeriodEnd?.toLocaleDateString() ?? '—'}</TableCell>
-                      <TableCell><CancelProjectSubscriptionButton projectId={projectId} id={s.id} /></TableCell>
+                      <TableCell><CancelProjectSubscriptionButton projectId={projectId} id={s.id} canCancelAtPeriodEnd={supports(getManifest(s.provider), 'subscription.cancel_at_period_end')} /></TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -258,9 +268,9 @@ export default async function ByopGatewayPage({
                   {orders.data.length === 0 && <TableRow><TableCell colSpan={7} className="text-muted-foreground">No records yet</TableCell></TableRow>}
                   {orders.data.map((o) => (
                     <TableRow key={o.id}>
-                      <TableCell>{o.offering.name}</TableCell>
+                      <TableCell>{o.projectOfferingPrice.offering.name}</TableCell>
                       <TableCell>{o.buyerEmail}</TableCell>
-                      <TableCell>{formatMoney(o.amountMinor, o.currencyCode)}</TableCell>
+                      <TableCell>{formatMoney(o.amount, o.currencyCode)}</TableCell>
                       <TableCell><StatusBadge status={o.status} /></TableCell>
                       <TableCell><RefCell value={o.providerOrderId} /></TableCell>
                       <TableCell>{o.createdAt.toLocaleString()}</TableCell>
@@ -281,12 +291,12 @@ export default async function ByopGatewayPage({
                   {subscriptions.data.length === 0 && <TableRow><TableCell colSpan={7} className="text-muted-foreground">No records yet</TableCell></TableRow>}
                   {subscriptions.data.map((s) => (
                     <TableRow key={s.id}>
-                      <TableCell>{s.offering.name}</TableCell>
+                      <TableCell>{s.projectOfferingPrice.offering.name}</TableCell>
                       <TableCell>{s.buyerEmail}</TableCell>
                       <TableCell><StatusBadge status={s.status} /></TableCell>
                       <TableCell>{s.currentPeriodEnd?.toLocaleDateString() ?? '—'}</TableCell>
                       <TableCell><RefCell value={s.providerSubscriptionId} /></TableCell>
-                      <TableCell className="flex gap-1"><RefreshProjectSubscriptionButton projectId={projectId} id={s.id} /><CancelProjectSubscriptionButton projectId={projectId} id={s.id} /></TableCell>
+                      <TableCell className="flex gap-1"><RefreshProjectSubscriptionButton projectId={projectId} id={s.id} /><CancelProjectSubscriptionButton projectId={projectId} id={s.id} canCancelAtPeriodEnd={supports(getManifest(s.provider), 'subscription.cancel_at_period_end')} /></TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

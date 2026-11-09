@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 import { prisma } from '@/lib/common/connectors/prisma';
 import { PaymentWebhookService } from '@/lib/common/services/payments/payment-webhook-service';
-import { listProviders, isProviderKey } from '@/lib/common/payments/core/factory';
+import { listManifests, isProviderKey } from '@/lib/common/payments/core/registry.server';
 import { parseOptionalString, parsePositivePage } from '@/lib/common/helpers/url-parsers';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -40,7 +40,7 @@ export default async function PlatformEventsPage({
       </div>
       <EventFilters
         provider={provider ?? ''}
-        providers={listProviders().map((p) => ({ key: p.key, label: p.label }))}
+        providers={listManifests().map((m) => ({ key: m.key, label: m.brand.name }))}
       />
       <Suspense key={`${provider}-${page}`} fallback={<Skeleton className="h-64" />}>
         <EventsTable provider={provider} page={page} query={query} />
@@ -64,7 +64,7 @@ async function EventsTable({
   query: Record<string, string | string[] | undefined>;
 }) {
   const service = new PaymentWebhookService(prisma);
-  const events = await service.listEvents({ provider, scope: 'platform', pagination: { page, limit: 10 } });
+  const events = await service.listPlatformEvents({ provider, pagination: { page, limit: 10 } });
 
   return (
     <Card>

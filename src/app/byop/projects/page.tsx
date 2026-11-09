@@ -28,7 +28,7 @@ export default async function ByopPage() {
       </div>
       <Separator />
       <div className="grid gap-6 md:grid-cols-2">
-        <CreateProjectForm countries={countries} />
+        <CreateProjectForm countries={countries.map((c) => ({ code: c.countryCode, name: c.name }))} />
         <Card>
           <CardHeader><CardTitle>Projects</CardTitle><CardDescription>Pick a project to manage its gateways and offerings</CardDescription></CardHeader>
           <CardContent className="space-y-2">

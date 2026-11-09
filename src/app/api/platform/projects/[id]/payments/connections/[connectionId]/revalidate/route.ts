@@ -2,7 +2,7 @@ export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/common/connectors/prisma';
 import { handleRouteError } from '@/lib/common/utils/api-error-handler';
-import { PaymentConnectionService } from '@/lib/project/services/payments/payment-connection-service';
+import { ProjectPaymentConnectionService } from '@/lib/project/services/payments/project-payment-connection-service';
 import type { ApiResponse } from '@/types/common';
 
 export async function POST(
@@ -11,7 +11,7 @@ export async function POST(
 ): Promise<NextResponse<ApiResponse<unknown>>> {
   try {
     const { id, connectionId } = await params;
-    const report = await new PaymentConnectionService(prisma).revalidate(id, connectionId);
+    const report = await new ProjectPaymentConnectionService(prisma).revalidate(id, connectionId);
     return NextResponse.json({ success: true, data: report }, { status: 200 });
   } catch (error: unknown) {
     return handleRouteError(error, 'POST /api/platform/projects/[id]/payments/connections/[connectionId]/revalidate');

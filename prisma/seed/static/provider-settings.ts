@@ -1,17 +1,19 @@
-import type { PrismaClient, PaymentProvider, PaymentFlow } from '@/generated/prisma';
-import { PaymentProviderSettingDAO } from '@/lib/common/dao/payments/payment-provider-setting-dao';
+import type { PrismaClient, PaymentProvider } from '@/generated/prisma';
+import { PlatformProviderRuleDAO } from '@/lib/platform/dao/payments/platform-provider-rule-dao';
+import { ProjectProviderRuleDAO } from '@/lib/project/dao/payments/project-provider-rule-dao';
 import { PROVIDER_SETTINGS } from './data/provider-settings';
 
 export async function seedProviderSettings(prisma: PrismaClient) {
-  const settingDAO = new PaymentProviderSettingDAO(prisma);
+  const platformDAO = new PlatformProviderRuleDAO(prisma);
+  const projectDAO = new ProjectProviderRuleDAO(prisma);
 
   let created = 0;
   for (const setting of PROVIDER_SETTINGS) {
     const provider = setting.provider as PaymentProvider;
-    const flow = setting.flow as PaymentFlow;
-    // Do not overwrite Catalog edits — create only when the row is missing.
-    if (await settingDAO.findByProvider(provider, flow)) continue;
-    await settingDAO.upsert(provider, flow, {
+    const dao = setting.flow === 'platform' ? platformDAO : projectDAO;
+    // Do not overwrite Providers-tab edits — create only when the row is missing.
+    if (await dao.findByProvider(provider)) continue;
+    await dao.upsert(provider, {
       isEnabled: setting.isEnabled,
       receiverCountries: [...setting.receiverCountries],
       payerCountries: [...setting.payerCountries],
@@ -20,5 +22,5 @@ export async function seedProviderSettings(prisma: PrismaClient) {
     created++;
   }
 
-  console.log(`✅ Seeded ${created} payment provider settings (${PROVIDER_SETTINGS.length - created} already existed)`);
+  console.log(`✅ Seeded ${created} provider rules (${PROVIDER_SETTINGS.length - created} already existed)`);
 }

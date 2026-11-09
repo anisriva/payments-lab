@@ -9,7 +9,7 @@ import { useConfirmCreditPurchase } from '@/hooks/platform/payments/use-confirm-
 import { CREDIT_QUICK_PICKS } from '@/lib/common/services/payments/payment-constants';
 import { formatMoney } from '@/lib/common/helpers/money';
 
-export function FixedCreditsCard({ gateway, payer, rateMinor, currencyCode }: { gateway: string; payer: string; rateMinor: number; currencyCode: string }) {
+export function FixedCreditsCard({ gateway, payer, projectId, rateMinor, currencyCode }: { gateway: string; payer: string; projectId: string; rateMinor: number; currencyCode: string }) {
   const [credits, setCredits] = useState<number>(CREDIT_QUICK_PICKS[0]);
   const start = useStartCreditPurchase();
   const confirm = useConfirmCreditPurchase();
@@ -34,7 +34,7 @@ export function FixedCreditsCard({ gateway, payer, rateMinor, currencyCode }: { 
       <CardFooter>
         <Button disabled={start.isPending} onClick={() =>
           flow.run({
-            start: () => start.mutateAsync({ gateway, payerCountry: payer, credits, kind: 'fixed' }),
+            start: () => start.mutateAsync({ projectId, gateway, payerCountry: payer, credits, kind: 'fixed' }),
             confirm: confirm.mutateAsync,
             recordUrl: (id) => `/api/platform/payments/credit-purchases/${id}`,
           })

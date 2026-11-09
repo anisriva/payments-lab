@@ -1,9 +1,12 @@
 import { prisma } from '@/lib/common/connectors/prisma';
 import { PlatformPaymentService } from '@/lib/platform/services/payments/platform-payment-service';
-import { ProviderSettingsService } from '@/lib/common/services/payments/provider-settings-service';
+import { ProviderRulesService } from '@/lib/common/services/payments/provider-rules-service';
+import { coveredValues } from '@/lib/common/payments/core/coverage';
+import { supports } from '@/lib/common/payments/core/contracts/features';
+import { providerKeySchema } from '@/lib/common/payments/core/contracts/manifest';
 import { CountryService } from '@/lib/common/services/catalog/country-service';
 import { RubricService } from '@/lib/common/services/payments/rubric-service';
-import { isProviderKey, listProviders } from '@/lib/common/payments/core/factory';
+import { isProviderKey, listManifests } from '@/lib/common/payments/core/registry.server';
 import { PLATFORM_RECEIVER_COUNTRY } from '@/lib/common/services/payments/payment-config';
 import { parseEnumParam, parseOptionalString } from '@/lib/common/helpers/url-parsers';
 import { formatMoney } from '@/lib/common/helpers/money';
@@ -23,13 +26,11 @@ import { RubricSimulatorForm } from '@/components/platform/catalog/rubric-simula
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { CheckResult } from '@/lib/common/payments/core/selector';
 import {} from '@/lib/utils';
-import {} from '@/lib/common/payments/core/factory';
 import { PlatformProviderService } from '@/lib/platform/services/payments/platform-provider-service';
-import {} from '@/lib/common/services/payments/webhook-registration-service';
 import { ValidationChecklist } from '@/components/common/payments/validation-checklist';
 import { CopyButton } from '@/components/project/payments/copy-button';
 import { ValidateProviderButton } from '@/components/platform/payments/validate-provider-button';
-import type { ValidationReport } from '@/lib/common/payments/core/types';
+import type { ValidationReport } from '@/lib/common/payments/core/connection-checks';
 
 export async function PlanPricesSection({ page }: { page: number }) {
   const service = new PlatformPaymentService(prisma);
@@ -58,13 +59,13 @@ export async function PlanPricesSection({ page }: { page: number }) {
             {planPrices.data.length === 0 && <TableRow><TableCell colSpan={8} className="text-muted-foreground">No plan prices yet</TableCell></TableRow>}
             {planPrices.data.map((p) => (
               <TableRow key={p.id}>
-                <TableCell className="font-mono text-xs">{p.planKey}</TableCell>
-                <TableCell>{p.displayName}</TableCell>
-                <TableCell>{p.interval}</TableCell>
-                <TableCell>{formatMoney(p.amountMinor, p.currencyCode)}</TableCell>
-                <TableCell>{p.currencyCode}</TableCell>
+                <TableCell className="font-mono text-xs">{p.plan?.key}</TableCell>
+                <TableCell>{p.plan?.name}</TableCell>
+                <TableCell>{p.billingMode}</TableCell>
+                <TableCell>{formatMoney(p.unitAmount, p.currencyCode)}</TableCell>
+                <TableCell>{p.market?.key ?? p.currencyCode}</TableCell>
                 <TableCell>
-                  {p.providerRefs.length === 0
+                  {(p.providerRefs ?? []).length === 0
                     ? <span className="text-muted-foreground">—</span>
                     : p.providerRefs.map((r) => (
                         <div key={r.provider} className="flex items-center gap-1">
@@ -74,7 +75,7 @@ export async function PlanPricesSection({ page }: { page: number }) {
                       ))}
                 </TableCell>
                 <TableCell><PlanPriceActiveSwitch id={p.id} checked={p.isActive} /></TableCell>
-                <TableCell><PlanPriceActions id={p.id} displayName={p.displayName} /></TableCell>
+                <TableCell><PlanPriceActions id={p.id} displayName={p.plan?.name ?? p.id} providerKeys={Object.keys((p.providerPlanRefs ?? {}) as Record<string, string>)} /></TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -103,16 +104,16 @@ export async function CreditRatesSection({ page }: { page: number }) {
       <CardContent>
         <Table>
           <TableHeader>
-            <TableRow><TableHead>Currency</TableHead><TableHead>Rate per credit</TableHead><TableHead>Active</TableHead><TableHead /></TableRow>
+            <TableRow><TableHead>Market</TableHead><TableHead>Price per credit</TableHead><TableHead>Active</TableHead><TableHead /></TableRow>
           </TableHeader>
           <TableBody>
             {rates.data.length === 0 && <TableRow><TableCell colSpan={4} className="text-muted-foreground">No credit rates yet</TableCell></TableRow>}
             {rates.data.map((r) => (
               <TableRow key={r.id}>
-                <TableCell>{r.currencyCode}</TableCell>
-                <TableCell>{formatMoney(r.rateMinor, r.currencyCode)}</TableCell>
+                <TableCell>{r.marketId.slice(0,8)}</TableCell>
+                <TableCell>{formatMoney(r.unitAmount, r.currencyCode)}</TableCell>
                 <TableCell><CreditRateActiveSwitch id={r.id} checked={r.isActive} /></TableCell>
-                <TableCell><CreditRateActions id={r.id} rateMinor={r.rateMinor} /></TableCell>
+                <TableCell><CreditRateActions id={r.id} rateMinor={r.unitAmount} /></TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -124,96 +125,125 @@ export async function CreditRatesSection({ page }: { page: number }) {
 }
 
 export async function ProvidersSection({ flow = 'platform' }: { flow?: 'platform' | 'project' } = {}) {
-  const providerSettingsService = new ProviderSettingsService(prisma);
+  const providerRulesService = new ProviderRulesService(prisma);
   const countryService = new CountryService(prisma);
   const [settings, countries, currencies] = await Promise.all([
-    providerSettingsService.listSettingsForCatalog(flow),
+    providerRulesService.listForProvidersTab(flow),
     countryService.listCountries(),
     countryService.listCurrencies(),
   ]);
   const platformService = new PlatformProviderService(prisma);
   const statuses = flow === 'platform'
-    ? new Map(await Promise.all(settings.map(async (s) => [s.provider, s.code.implemented ? await platformService.getStatus(s.provider) : null] as const)))
+    ? new Map(await Promise.all(settings.map(async (s) => [s.provider, s.implemented ? await platformService.getStatus(s.provider) : null] as const)))
     : null;
+
+  const PROVIDER_LABELS: Record<string, string> = { dodo: 'Dodo Payments', stripe: 'Stripe', paypal: 'PayPal' };
+  const FEATURE_ROWS: [string, import('@/lib/common/payments/core/contracts/features').ProviderFeature][] = [
+    ['Subscriptions', 'subscription.create'],
+    ['Custom amounts', 'checkout.custom_amount'],
+    ['Automatic webhook registration', 'webhook.write'],
+    ['Webhook disable', 'webhook.disable'],
+    ['Webhook delete', 'webhook.delete'],
+    ['Plan edit', 'subscription_plan.update'],
+    ['Plan delete', 'subscription_plan.delete'],
+  ];
 
   return (
     <div className="space-y-4">
-      {settings.map((s) => (
+      {settings.map((s) => {
+        const label = s.manifest?.brand.name ?? PROVIDER_LABELS[s.provider] ?? s.provider;
+        const manualSteps = s.manifest
+          ? (Object.entries(s.manifest.features) as [string, { supported: boolean; manual?: { title: string; steps: string[] } }][])
+              .filter(([, f]) => !f.supported && f.manual)
+              .map(([, f]) => f.manual!)
+          : [];
+        const defaultLists = s.manifest ? coveredValues(s.manifest) : { receivers: '*' as const, payers: '*' as const, currencies: '*' as const };
+        return (
         <Card key={s.provider}>
           <CardHeader>
             <div className="flex items-center gap-2">
-              <CardTitle>{s.code.label}</CardTitle>
-              <Badge variant={s.code.implemented ? 'secondary' : 'outline'}>{s.code.implemented ? 'implemented' : 'not implemented'}</Badge>
-              {s.code.flows.map((f) => <Badge key={f} variant="outline">{f}</Badge>)}
-              {s.code.supportsSubscriptions && <Badge variant="outline">subscriptions</Badge>}
-              {s.code.supportsCustomAmount && <Badge variant="outline">custom amount</Badge>}
+              <CardTitle>{label}</CardTitle>
+              <Badge variant={s.implemented ? 'secondary' : 'outline'}>{s.implemented ? 'implemented' : 'not implemented'}</Badge>
+              {(s.manifest?.audiences ?? []).map((f) => <Badge key={f} variant="outline">{f}</Badge>)}
+              {s.manifest && supports(s.manifest, 'subscription.create') && <Badge variant="outline">subscriptions</Badge>}
+              {s.manifest && supports(s.manifest, 'checkout.custom_amount') && <Badge variant="outline">custom amount</Badge>}
+              {s.rule !== null && s.rule.isEnabled
+                ? <Badge variant="secondary">enabled · p{s.rule.priority}</Badge>
+                : <Badge variant="outline">disabled</Badge>}
             </div>
-            <CardDescription>{s.hasRow ? 'Custom rules stored in the Catalog' : 'Using code defaults — saving creates a Catalog row'}</CardDescription>
+            <CardDescription>{s.hasRow ? 'Rules stored in this audience\'s rules table' : 'No rules row — disabled until saved here'}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {s.profile && (
+            {s.manifest && (
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-1">
-                  <p className="text-sm font-medium">Capabilities</p>
+                  <p className="text-sm font-medium">Features</p>
                   <ul className="text-sm text-muted-foreground space-y-1">
-                    {[
-                      ['Subscriptions', s.code.supportsSubscriptions],
-                      ['Custom amounts', s.code.supportsCustomAmount],
-                      ['Automatic webhook registration', s.profile.webhook.autoRegister],
-                      ['Webhook disable', s.profile.webhook.canDeactivate],
-                      ['Webhook delete', s.profile.webhook.canDelete],
-                      ['Plan edit', s.profile.catalog.plansEditable],
-                      ['Plan delete', s.profile.catalog.plansDeletable],
-                    ].map(([label, ok]) => (
-                      <li key={String(label)}>{ok ? '✓' : '✗'} {String(label)}</li>
+                    {FEATURE_ROWS.map(([lbl, f]) => (
+                      <li key={lbl}>{supports(s.manifest!, f) ? '✓' : '✗'} {lbl}</li>
                     ))}
                   </ul>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-sm font-medium">Constraints</p>
+                  <p className="text-sm font-medium">Manual steps</p>
                   <ul className="text-sm text-muted-foreground space-y-1">
-                    {s.profile.constraints.map((c) => <li key={c}>· {c}</li>)}
+                    {manualSteps.length === 0 && <li>—</li>}
+                    {manualSteps.map((m) => (
+                      <li key={m.title}>· {m.title} — {m.steps[0]}</li>
+                    ))}
+                    {s.manifest.coverage.filter((l) => l.note).map((l) => (
+                      <li key={l.note}>· {l.note}</li>
+                    ))}
                   </ul>
                 </div>
               </div>
             )}
-            {s.profile && flow === 'project' && (
+            {s.manifest && (
               <div className="space-y-1">
-                <p className="text-sm font-medium">Onboarding preview</p>
-                <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
-                  {s.profile.onboarding.map((o) => (
-                    <li key={o.title}>{o.title}{o.docsUrl ? ` — ${o.docsUrl}` : ''}</li>
+                <p className="text-sm font-medium">Actions</p>
+                <ul className="text-sm text-muted-foreground space-y-1">
+                  {([
+                    ['Cancel at period end', 'subscription.cancel_at_period_end'],
+                    ['Cancel now', 'subscription.cancel'],
+                    ['Refund', 'refund.create'],
+                    ['Discounts', 'discount.create'],
+                    ['Disable plan', 'subscription_plan.disable'],
+                    ['Webhook cleanup on disconnect', 'webhook.delete'],
+                  ] as [string, import('@/lib/common/payments/core/contracts/features').ProviderFeature][]).map(([lbl, f]) => (
+                    <li key={lbl}>{supports(s.manifest!, f) ? '✓' : '✗'} {lbl}</li>
                   ))}
-                </ol>
+                </ul>
               </div>
             )}
-            {flow === 'platform' && s.code.implemented && statuses?.get(s.provider) && (
+            {flow === 'platform' && s.implemented && statuses?.get(s.provider) && (
               <PlatformWebhookBlock provider={s.provider} status={statuses.get(s.provider)!} />
             )}
-            {s.code.implemented ? (
+            {s.implemented ? (
               <ProviderSettingsForm
                 provider={s.provider}
                 flow={flow}
                 initial={{
-                  isEnabled: s.effective.enabled !== false,
-                  receiverCountries: s.effective.receiverCountries,
-                  payerCountries: s.effective.payerCountries,
-                  currencies: s.effective.currencies,
+                  isEnabled: s.rule?.isEnabled ?? false,
+                  priority: s.rule?.priority ?? 100,
+                  receiverCountries: s.rule?.receiverCountries ?? defaultLists.receivers,
+                  payerCountries: s.rule?.payerCountries ?? defaultLists.payers,
+                  currencies: s.rule?.currencies ?? defaultLists.currencies,
                 }}
                 countries={countries}
                 currencies={currencies}
               />
             ) : (
-              <Alert><AlertTitle>Not implemented yet</AlertTitle><AlertDescription>{s.code.label} has no adapter, so its rules can&apos;t be edited.</AlertDescription></Alert>
+              <Alert><AlertTitle>Not implemented yet</AlertTitle><AlertDescription>{label} has no adapter, so its rules can&apos;t be edited.</AlertDescription></Alert>
             )}
           </CardContent>
         </Card>
-      ))}
+        );
+      })}
     </div>
   );
 }
 
-const CHECK_COLUMNS = ['allowed', 'implemented', 'enabled', 'receiver', 'payer', 'currency', 'subscriptions'] as const;
+const CHECK_COLUMNS = ['allowed', 'audience', 'enabled', 'receiver', 'payer', 'currency', 'subscriptions', 'available'] as const;
 
 export function CheckBadge({ check }: { check: CheckResult }) {
   return (
@@ -244,7 +274,7 @@ export async function RubricSection({ query, lockedFlow, showProjectMap = true, 
 
   const countries = await countryService.listCountries();
   const currencies = await countryService.listCurrencies();
-  const countryCodes = countries.map((c) => c.code);
+  const countryCodes = countries.map((c) => c.countryCode);
 
   const flow = lockedFlow ?? parseEnumParam(query.flow, ['platform', 'project'] as const, 'platform');
   const mode = parseEnumParam(query.mode, ['one_time', 'subscription'] as const, 'one_time');
@@ -254,7 +284,7 @@ export async function RubricSection({ query, lockedFlow, showProjectMap = true, 
   const currency = currencyParam && /^[A-Z]{3}$/.test(currencyParam) ? currencyParam : undefined;
   const allowedParam = parseOptionalString(query.allowed);
   const allowed = allowedParam
-    ? allowedParam.split(',').filter((k): k is import('@/lib/common/payments/core/types').ProviderKey => isProviderKey(k))
+    ? allowedParam.split(',').filter((k): k is import('@/lib/common/payments/core/contracts/provider').ProviderKey => isProviderKey(k))
     : undefined;
 
   const [simulation, platformRows, projectRows] = await Promise.all([
@@ -284,9 +314,9 @@ export async function RubricSection({ query, lockedFlow, showProjectMap = true, 
             receiver={receiver}
             currency={simulation.input.currency}
             allowed={allowed ?? []}
-            countries={countries}
+            countries={countries.map((c) => ({ code: c.countryCode, name: c.name }))}
             currencies={currencies}
-            providers={listProviders('project').map((p) => ({ key: p.key, label: p.label }))}
+            providers={providerKeySchema.options.map((k) => ({ key: k, label: listManifests('project').find((m) => m.key === k)?.brand.name ?? k }))}
           />
           <Table>
             <TableHeader>

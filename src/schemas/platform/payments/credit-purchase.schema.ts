@@ -8,6 +8,7 @@ import { z } from 'zod';
  * - Form: CustomCreditsForm
  */
 export const creditPurchaseCreateSchema = z.object({
+  projectId: z.string().min(1),
   gateway: z.string().min(1),
   payerCountry: z.string().length(2),
   credits: z.number().int(),

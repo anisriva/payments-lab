@@ -5,7 +5,7 @@ import type { PrismaClient, ProjectOrder, Prisma } from '@/generated/prisma';
 import type { ProjectOrderCreateInput, ProjectOrderUpdateInput, ProjectOrderListOptions } from './types';
 
 const projectOrderListInclude = {
-  offering: true,
+  projectOfferingPrice: { include: { offering: true } },
 } satisfies Prisma.ProjectOrderInclude;
 
 export type ProjectOrderWithOffering = Prisma.ProjectOrderGetPayload<{
@@ -53,7 +53,7 @@ export class ProjectOrderDAO {
 
   async existsForOffering(offeringId: string): Promise<boolean> {
     const count = await this.prisma.projectOrder.count({
-      where: { offeringId },
+      where: { projectOfferingPrice: { offeringId } },
     });
     return count > 0;
   }

@@ -3,20 +3,23 @@ import type { PrismaClient, ProjectOffering, ProjectOrder, ProjectSubscription }
 import type { PrismaTransaction } from '@/lib/common/dao';
 import { ProjectDAO } from '@/lib/platform/dao/projects/project-dao';
 import { ProjectOfferingDAO } from '@/lib/project/dao/payments/project-offering-dao';
+import { ProjectOfferingPriceDAO } from '@/lib/project/dao/payments/project-offering-price-dao';
+import { ProjectPaymentDAO } from '@/lib/project/dao/payments/project-payment-dao';
 import { ProjectOrderDAO } from '@/lib/project/dao/payments/project-order-dao';
 import { ProjectSubscriptionDAO } from '@/lib/project/dao/payments/project-subscription-dao';
-import { ProviderProductDAO } from '@/lib/common/dao/payments/provider-product-dao';
-import { PaymentConnectionDAO } from '@/lib/project/dao/payments/payment-connection-dao';
-import { PaymentConnectionService } from './payment-connection-service';
-import { ProviderProductService } from '@/lib/common/services/payments/provider-product-service';
-import { ProviderSettingsService } from '@/lib/common/services/payments/provider-settings-service';
+import { ProjectPaymentConnectionDAO } from '@/lib/project/dao/payments/project-payment-connection-dao';
+import { ProjectPaymentConnectionService } from './project-payment-connection-service';
+import { ensurePlanRef, readPlanRef } from '@/lib/common/services/payments/provider-plan-service';
+import { ProviderRulesService } from '@/lib/common/services/payments/provider-rules-service';
 import { CountryService } from '@/lib/common/services/catalog/country-service';
 import { canMovePayment, canMoveSubscription } from '@/lib/common/services/payments/payment-transitions';
 import { SUBSCRIPTION_TOTAL_CYCLES } from '@/lib/common/services/payments/payment-constants';
-import { getPaymentEnvironment } from '@/lib/common/services/payments/payment-config';
-import { currencyAllowed } from '@/lib/common/payments/core/factory';
-import { InvalidPaymentSignatureError } from '@/lib/common/payments/core/errors';
-import type { CheckoutInstruction, NormalizedEvent } from '@/lib/common/payments/core/types';
+import { getPaymentEnvironment } from '@/config/payments/env';
+import { currencyAllowed } from '@/lib/common/payments/core/coverage';
+import { supports } from '@/lib/common/payments/core/contracts/features';
+import { InvalidPaymentSignatureError, PaymentCapabilityNotSupportedError } from '@/lib/common/payments/core/errors';
+import type { CheckoutInstruction } from '@/lib/common/payments/core/contracts/checkout';
+import type { NormalizedEvent } from '@/lib/common/payments/core/contracts/events';
 import type { PaginationInput } from '@/types/common/pagination';
 import type { PaymentProvider as DbProvider } from '@/generated/prisma';
 import { ProjectNotFoundError } from '@/lib/platform/services/projects/errors';
@@ -36,25 +39,25 @@ import { PaymentNotStartedError } from '@/lib/platform/services/payments/errors'
 export class ProjectPaymentService {
   private projectDAO: ProjectDAO;
   private offeringDAO: ProjectOfferingDAO;
+  private offeringPriceDAO: ProjectOfferingPriceDAO;
+  private paymentDAO: ProjectPaymentDAO;
   private orderDAO: ProjectOrderDAO;
   private subscriptionDAO: ProjectSubscriptionDAO;
-  private providerProductDAO: ProviderProductDAO;
-  private connectionDAO: PaymentConnectionDAO;
-  private paymentConnectionService: PaymentConnectionService;
-  private providerProductService: ProviderProductService;
-  private providerSettingsService: ProviderSettingsService;
+  private connectionDAO: ProjectPaymentConnectionDAO;
+  private connectionService: ProjectPaymentConnectionService;
+  private providerRulesService: ProviderRulesService;
   private countryService: CountryService;
 
   constructor(private readonly prisma: PrismaClient) {
     this.projectDAO = new ProjectDAO(prisma);
     this.offeringDAO = new ProjectOfferingDAO(prisma);
+    this.offeringPriceDAO = new ProjectOfferingPriceDAO(prisma);
+    this.paymentDAO = new ProjectPaymentDAO(prisma);
     this.orderDAO = new ProjectOrderDAO(prisma);
     this.subscriptionDAO = new ProjectSubscriptionDAO(prisma);
-    this.providerProductDAO = new ProviderProductDAO(prisma);
-    this.connectionDAO = new PaymentConnectionDAO(prisma);
-    this.paymentConnectionService = new PaymentConnectionService(prisma);
-    this.providerProductService = new ProviderProductService(prisma);
-    this.providerSettingsService = new ProviderSettingsService(prisma);
+    this.connectionDAO = new ProjectPaymentConnectionDAO(prisma);
+    this.connectionService = new ProjectPaymentConnectionService(prisma);
+    this.providerRulesService = new ProviderRulesService(prisma);
     this.countryService = new CountryService(prisma);
   }
 
@@ -68,17 +71,18 @@ export class ProjectPaymentService {
 
   async listOfferingsForSetup(projectId: string, pagination?: PaginationInput) {
     const result = await this.offeringDAO.listByProject(projectId, { pagination });
-    const products = await this.providerProductDAO.listByRefs(
-      'offering',
-      result.data.map((o) => o.id)
-    );
+    const connections = await this.connectionDAO.listEnabledByProject(projectId);
+    const byId = new Map(connections.map((c) => [c.id, c.provider]));
+    const prices = await Promise.all(result.data.map((o) => this.offeringPriceDAO.listForOffering(o.id)));
     return {
       ...result,
-      data: result.data.map((o) => ({
+      data: result.data.map((o, i) => ({
         ...o,
-        providerRefs: products
-          .filter((r) => r.refId === o.id)
-          .map((r) => ({ scope: r.scope, provider: r.provider, providerRef: r.providerRef })),
+        prices: prices[i],
+        providerRefs: prices[i].flatMap((pr) =>
+          Object.entries((pr.providerPlanRefs ?? {}) as Record<string, string>).map(
+            ([connectionId, providerRef]) => ({ scope: connectionId, provider: byId.get(connectionId) ?? connectionId, providerRef }),
+          )),
       })),
     };
   }
@@ -105,39 +109,44 @@ export class ProjectPaymentService {
     }
 
     const currencyCode = (await this.countryService.getCountry(project.countryCode)).currencyCode;
-    const id = data.priceType === 'recurring' ? randomUUID() : undefined;
+    const offeringId = randomUUID();
+    const priceId = data.priceType === 'recurring' ? randomUUID() : undefined;
+    const providerPlanRefs: Record<string, string> = {};
 
     // Eager plan creation at every enabled connection that supports it
     // (external calls — outside any transaction; any failure aborts the create)
     if (data.priceType === 'recurring') {
       const connections = await this.connectionDAO.listEnabledByProject(projectId);
       for (const connection of connections) {
-        const caps = await this.providerSettingsService.getEffectiveCapability(connection.provider, 'project');
-        if (!caps.supportsSubscriptions || !currencyAllowed(caps.currencies, currencyCode)) continue;
-        const { adapter } = await this.paymentConnectionService.getAdapter(connection.id, { requireEnabled: true });
-        await this.providerProductService.ensure({
-          scope: connection.id,
-          provider: connection.provider,
-          environment: getPaymentEnvironment(),
-          refType: 'offering',
-          refId: id!,
-          adapter,
-          product: {
-            name: data.name,
-            amount: { amountMinor: data.amountMinor, currency: currencyCode },
-            interval: data.interval!,
-          },
+        const rule = await this.providerRulesService.getRule(connection.provider, 'project');
+        if (!rule?.isEnabled || !currencyAllowed(rule.currencies, currencyCode)) continue;
+        const { adapter } = await this.connectionService.getAdapter(connection.id, { requireEnabled: true });
+        if (!supports(adapter.manifest, 'subscription_plan.create')) continue;
+        const { providerRef } = await adapter.createSubscriptionPlan!({
+          name: data.name,
+          amount: { amountMinor: data.amountMinor, currency: currencyCode },
+          interval: data.interval!,
         });
+        providerPlanRefs[connection.id] = providerRef;
       }
     }
 
-    return this.offeringDAO.create({ id, projectId, name: data.name, priceType: data.priceType, amountMinor: data.amountMinor, interval: data.interval, currencyCode, isActive: true });
+    const offering = await this.offeringDAO.create({
+      id: offeringId, projectId, module: 'shop', moduleItemId: offeringId,
+      name: data.name, isActive: true,
+    });
+    await this.offeringPriceDAO.create({
+      id: priceId, offeringId: offering.id, marketId: null, priceType: data.priceType,
+      amount: data.amountMinor, currencyCode, billingMode: data.interval ?? null,
+      providerPlanRefs, isActive: true,
+    });
+    return offering;
   }
 
   async updateOffering(
     projectId: string,
     offeringId: string,
-    data: { name?: string; isActive?: boolean }
+    data: { name?: string; isActive?: boolean },
   ): Promise<ProjectOffering> {
     const offering = await this.offeringDAO.findById(offeringId);
     if (!offering || offering.projectId !== projectId) throw new OfferingNotFoundError(offeringId);
@@ -153,106 +162,145 @@ export class ProjectPaymentService {
     ) {
       throw new OfferingInUseError(offeringId);
     }
-    await this.prisma.$transaction(async (tx: PrismaTransaction) => {
-      await new ProviderProductDAO(tx).deleteByRef('offering', offeringId);
-      await new ProjectOfferingDAO(tx).delete(offeringId);
-    });
+    await this.offeringDAO.delete(offeringId);
   }
 
   private async getActiveConnection(projectId: string, provider: string) {
-    const connection = await this.paymentConnectionService.getForProject(projectId, provider);
+    const connection = await this.connectionService.getForProject(projectId, provider);
     if (!connection || !connection.isEnabled) throw new GatewayNotConnectedError(provider);
-    return this.paymentConnectionService.getAdapter(connection.id, { requireEnabled: true });
+    return this.connectionService.getAdapter(connection.id, { requireEnabled: true });
   }
 
   private async assertCurrencySupported(provider: DbProvider, currencyCode: string) {
-    const caps = await this.providerSettingsService.getEffectiveCapability(provider, 'project');
-    if (!currencyAllowed(caps.currencies, currencyCode)) {
-      throw new CurrencyNotSupportedError(caps.label, currencyCode);
+    const rule = await this.providerRulesService.getRule(provider, 'project');
+    const covered = rule?.currencies ?? '*';
+    if (!currencyAllowed(covered, currencyCode)) {
+      throw new CurrencyNotSupportedError(provider, currencyCode);
     }
   }
 
-  async startOrder(projectId: string, input: { provider: string; offeringId: string; buyerEmail: string; amountMinor?: number }): Promise<{ recordId: string; instruction: CheckoutInstruction }> {
+  async startOrder(projectId: string, input: { provider: string; offeringId: string; buyerEmail: string; amountMinor?: number }): Promise<{ recordId: string; provider: DbProvider; instruction: CheckoutInstruction }> {
     const offering = await this.offeringDAO.findById(input.offeringId);
     if (!offering || offering.projectId !== projectId || !offering.isActive) throw new OfferingNotFoundError(input.offeringId);
-    if (offering.priceType === 'recurring') throw new OfferingNotPurchasableError(offering.name);
+    const market = await this.countryService.getMarket(projectId ? (await this.projectDAO.findById(projectId))!.countryCode : '');
+    const price = await this.offeringPriceDAO.resolveForMarket(offering.id, market?.id ?? null);
+    if (!price || price.priceType === 'recurring') throw new OfferingNotPurchasableError(offering.name);
 
-    let amountMinor: number;
-    if (offering.priceType === 'fixed') {
-      amountMinor = offering.amountMinor;
+    let unitAmount: number;
+    if (price.priceType === 'fixed') {
+      unitAmount = price.amount;
     } else {
       const clientAmount = input.amountMinor;
-      if (!Number.isInteger(clientAmount) || clientAmount! < offering.amountMinor) {
-        throw new AmountBelowMinimumError(offering.amountMinor);
+      if (!Number.isInteger(clientAmount) || clientAmount! < price.amount) {
+        throw new AmountBelowMinimumError(price.amount);
       }
-      amountMinor = clientAmount!;
+      unitAmount = clientAmount!;
     }
 
     const { connection, adapter } = await this.getActiveConnection(projectId, input.provider);
-    await this.assertCurrencySupported(connection.provider, offering.currencyCode);
+    await this.assertCurrencySupported(connection.provider, price.currencyCode);
+    if (!supports(adapter.manifest, 'checkout.one_time')) {
+      throw new PaymentCapabilityNotSupportedError(adapter.manifest.brand.name, 'one-time checkout');
+    }
+    if (price.priceType === 'custom' && !supports(adapter.manifest, 'checkout.custom_amount')) {
+      throw new PaymentCapabilityNotSupportedError(adapter.manifest.brand.name, 'custom amounts');
+    }
 
+    const projectUser = await this.prisma.projectUser.upsert({
+      where: { projectId_email: { projectId, email: input.buyerEmail } },
+      create: { projectId, email: input.buyerEmail },
+      update: {},
+    });
     const order = await this.orderDAO.create({
-      projectId, connectionId: connection.id, offeringId: offering.id, provider: connection.provider,
+      projectId, projectUserId: projectUser.id, connectionId: connection.id,
+      projectOfferingPriceId: price.id, provider: connection.provider,
       environment: getPaymentEnvironment(), buyerEmail: input.buyerEmail,
-      amountMinor, currencyCode: offering.currencyCode, status: 'pending',
+      quantity: 1, unitAmount, amount: unitAmount, currencyCode: price.currencyCode, status: 'pending',
     });
 
     let checkout;
     try {
-      checkout = await adapter.createOneTimeCheckout({
-        amount: { amountMinor, currency: offering.currencyCode },
-        description: offering.name, receipt: order.id, buyerEmail: input.buyerEmail,
-        notes: { flow: 'project', recordId: order.id },
+      checkout = await adapter.createOneTimeCheckout!({
+        reference: { kind: 'project_order', id: order.id },
+        amount: { amountMinor: unitAmount, currency: price.currencyCode },
+        description: offering.name,
+        buyer: { email: input.buyerEmail },
+        context: { projectId },
       });
     } catch (e) {
       await this.orderDAO.update(order.id, { status: 'failed', failureReason: e instanceof Error ? e.message : 'Unknown error' });
       throw e;
     }
     await this.orderDAO.update(order.id, { providerOrderId: checkout.providerRef });
-    return { recordId: order.id, instruction: checkout.instruction };
+    return { recordId: order.id, provider: connection.provider, instruction: checkout.instruction };
   }
 
-  async startSubscription(projectId: string, input: { provider: string; offeringId: string; buyerEmail: string }): Promise<{ recordId: string; instruction: CheckoutInstruction }> {
+  async startSubscription(projectId: string, input: { provider: string; offeringId: string; buyerEmail: string }): Promise<{ recordId: string; provider: DbProvider; instruction: CheckoutInstruction }> {
     const offering = await this.offeringDAO.findById(input.offeringId);
     if (!offering || offering.projectId !== projectId || !offering.isActive) throw new OfferingNotFoundError(input.offeringId);
-    if (offering.priceType !== 'recurring') throw new OfferingNotPurchasableError(offering.name);
+    const project = await this.projectDAO.findById(projectId);
+    const market = project ? await this.countryService.getMarket(project.countryCode) : null;
+    const price = await this.offeringPriceDAO.resolveForMarket(offering.id, market?.id ?? null);
+    if (!price || price.priceType !== 'recurring') throw new OfferingNotPurchasableError(offering.name);
 
     const { connection, adapter } = await this.getActiveConnection(projectId, input.provider);
-    await this.assertCurrencySupported(connection.provider, offering.currencyCode);
+    await this.assertCurrencySupported(connection.provider, price.currencyCode);
+    if (!supports(adapter.manifest, 'subscription.create')) {
+      throw new PaymentCapabilityNotSupportedError(adapter.manifest.brand.name, 'subscriptions');
+    }
 
-    const productRef = await this.providerProductService.ensure({
-      scope: connection.id, provider: connection.provider, environment: getPaymentEnvironment(),
-      refType: 'offering', refId: offering.id, adapter,
-      product: { name: offering.name, amount: { amountMinor: offering.amountMinor, currency: offering.currencyCode }, interval: offering.interval! },
+    const planRef = await ensurePlanRef({
+      providerPlanRefs: price.providerPlanRefs,
+      key: connection.id,
+      adapter,
+      plan: {
+        name: offering.name,
+        amount: { amountMinor: price.amount, currency: price.currencyCode },
+        interval: price.billingMode!,
+      },
+      persist: async (refs) => { await this.offeringPriceDAO.update(price.id, { providerPlanRefs: refs }); },
     });
 
+    const projectUser = await this.prisma.projectUser.upsert({
+      where: { projectId_email: { projectId, email: input.buyerEmail } },
+      create: { projectId, email: input.buyerEmail },
+      update: {},
+    });
     const subscription = await this.subscriptionDAO.create({
-      projectId, connectionId: connection.id, offeringId: offering.id, provider: connection.provider,
-      environment: getPaymentEnvironment(), buyerEmail: input.buyerEmail, status: 'pending',
+      projectId, projectUserId: projectUser.id, connectionId: connection.id,
+      projectOfferingPriceId: price.id, provider: connection.provider, quantity: 1,
+      environment: getPaymentEnvironment(), buyerEmail: input.buyerEmail, status: 'incomplete',
     });
 
     let checkout;
     try {
-      checkout = await adapter.createSubscription({
-        productRef, totalCycles: SUBSCRIPTION_TOTAL_CYCLES[offering.interval!],
-        description: offering.name, buyerEmail: input.buyerEmail,
-        notes: { flow: 'project', recordId: subscription.id },
+      checkout = await adapter.createSubscription!({
+        reference: { kind: 'project_subscription', id: subscription.id },
+        planRef,
+        totalCycles: SUBSCRIPTION_TOTAL_CYCLES[price.billingMode!],
+        description: offering.name,
+        buyer: { email: input.buyerEmail },
+        context: { projectId },
       });
     } catch (e) {
-      await this.subscriptionDAO.update(subscription.id, { status: 'cancelled', failureReason: e instanceof Error ? e.message : 'Unknown error' });
+      await this.subscriptionDAO.update(subscription.id, { status: 'canceled', failureReason: e instanceof Error ? e.message : 'Unknown error' });
       throw e;
     }
     await this.subscriptionDAO.update(subscription.id, { providerSubscriptionId: checkout.providerRef });
-    return { recordId: subscription.id, instruction: checkout.instruction };
+    return { recordId: subscription.id, provider: connection.provider, instruction: checkout.instruction };
   }
 
-  async cancelSubscription(projectId: string, id: string, atCycleEnd: boolean): Promise<ProjectSubscription> {
+  async cancelSubscription(projectId: string, id: string, atPeriodEnd: boolean): Promise<ProjectSubscription> {
     const sub = await this.subscriptionDAO.findById(id);
     if (!sub || sub.projectId !== projectId) throw new ProjectSubscriptionNotFoundError(id);
     if (!sub.providerSubscriptionId) throw new PaymentNotStartedError(id);
-    const { adapter } = await this.paymentConnectionService.getAdapter(sub.connectionId, { requireEnabled: false });
-    await adapter.cancelSubscription(sub.providerSubscriptionId, { atCycleEnd });
-    await this.subscriptionDAO.update(id, { cancelAtCycleEnd: atCycleEnd });
+    const { adapter } = await this.connectionService.getAdapter(sub.connectionId, { requireEnabled: false });
+    const feature = atPeriodEnd ? 'subscription.cancel_at_period_end' : 'subscription.cancel';
+    if (!supports(adapter.manifest, feature)) {
+      throw new PaymentCapabilityNotSupportedError(adapter.manifest.brand.name, 'subscription cancellation');
+    }
+    await adapter.cancelSubscription!(sub.providerSubscriptionId, { atPeriodEnd });
+    await this.subscriptionDAO.update(id, { cancelAtPeriodEnd: atPeriodEnd });
     return this.refreshSubscription(projectId, id);
   }
 
@@ -260,9 +308,10 @@ export class ProjectPaymentService {
     const order = await this.orderDAO.findById(id);
     if (!order || order.projectId !== projectId) throw new ProjectOrderNotFoundError(id);
     if (!order.providerOrderId) return order;
-    const { adapter } = await this.paymentConnectionService.getAdapter(order.connectionId, { requireEnabled: false });
-    const result = await adapter.getPaymentStatus(order.providerOrderId);
-    return this.applyOrderStatus(order, result.status, result.paymentId);
+    const { adapter } = await this.connectionService.getAdapter(order.connectionId, { requireEnabled: false });
+    if (!supports(adapter.manifest, 'payment.read')) return order;
+    const result = await adapter.getPaymentStatus!(order.providerOrderId);
+    return this.applyOrderStatus(order, result.status === 'refunded' ? 'refunded' : result.status, result.paymentId);
   }
 
   async syncOrder(projectId: string, id: string): Promise<ProjectOrder> {
@@ -275,14 +324,15 @@ export class ProjectPaymentService {
     const sub = await this.subscriptionDAO.findById(id);
     if (!sub || sub.projectId !== projectId) throw new ProjectSubscriptionNotFoundError(id);
     if (!sub.providerSubscriptionId) return sub;
-    const { adapter } = await this.paymentConnectionService.getAdapter(sub.connectionId, { requireEnabled: false });
-    const result = await adapter.getSubscriptionStatus(sub.providerSubscriptionId);
+    const { adapter } = await this.connectionService.getAdapter(sub.connectionId, { requireEnabled: false });
+    if (!supports(adapter.manifest, 'subscription.read')) return sub;
+    const result = await adapter.getSubscriptionStatus!(sub.providerSubscriptionId);
     if (canMoveSubscription(sub.status, result.status)) {
       return this.subscriptionDAO.update(id, {
         status: result.status,
         currentPeriodStart: result.currentPeriodStart ?? undefined,
         currentPeriodEnd: result.currentPeriodEnd ?? undefined,
-        canceledAt: result.status === 'cancelled' ? new Date() : undefined,
+        canceledAt: result.status === 'canceled' ? new Date() : undefined,
       });
     }
     return sub;
@@ -291,16 +341,22 @@ export class ProjectPaymentService {
   async syncSubscription(projectId: string, id: string): Promise<ProjectSubscription> {
     const sub = await this.subscriptionDAO.findById(id);
     if (!sub || sub.projectId !== projectId) throw new ProjectSubscriptionNotFoundError(id);
-    return sub.status === 'pending' ? this.refreshSubscription(projectId, id) : sub;
+    return sub.status === 'incomplete' ? this.refreshSubscription(projectId, id) : sub;
   }
 
   async confirmOrder(projectId: string, id: string, confirmation: { paymentId: string; signature: string }): Promise<ProjectOrder> {
     const order = await this.orderDAO.findById(id);
     if (!order || order.projectId !== projectId) throw new ProjectOrderNotFoundError(id);
     if (!order.providerOrderId) throw new PaymentNotStartedError(id);
-    const { adapter } = await this.paymentConnectionService.getAdapter(order.connectionId, { requireEnabled: false });
-    const valid = adapter.verifyClientConfirmation({ kind: 'order', providerRef: order.providerOrderId, paymentId: confirmation.paymentId, signature: confirmation.signature });
-    if (!valid) throw new InvalidPaymentSignatureError(order.provider);
+    const { adapter } = await this.connectionService.getAdapter(order.connectionId, { requireEnabled: false });
+    if (!supports(adapter.manifest, 'checkout.client_confirmation')) {
+      throw new PaymentCapabilityNotSupportedError(adapter.manifest.brand.name, 'client confirmation');
+    }
+    const result = await adapter.confirmClientPayment!({
+      providerRef: order.providerOrderId,
+      payload: { paymentId: confirmation.paymentId, signature: confirmation.signature, kind: 'order' },
+    });
+    if (!result.confirmed) throw new InvalidPaymentSignatureError(order.provider);
     return this.refreshOrder(projectId, id);
   }
 
@@ -308,9 +364,15 @@ export class ProjectPaymentService {
     const sub = await this.subscriptionDAO.findById(id);
     if (!sub || sub.projectId !== projectId) throw new ProjectSubscriptionNotFoundError(id);
     if (!sub.providerSubscriptionId) throw new PaymentNotStartedError(id);
-    const { adapter } = await this.paymentConnectionService.getAdapter(sub.connectionId, { requireEnabled: false });
-    const valid = adapter.verifyClientConfirmation({ kind: 'subscription', providerRef: sub.providerSubscriptionId, paymentId: confirmation.paymentId, signature: confirmation.signature });
-    if (!valid) throw new InvalidPaymentSignatureError(sub.provider);
+    const { adapter } = await this.connectionService.getAdapter(sub.connectionId, { requireEnabled: false });
+    if (!supports(adapter.manifest, 'checkout.client_confirmation')) {
+      throw new PaymentCapabilityNotSupportedError(adapter.manifest.brand.name, 'client confirmation');
+    }
+    const result = await adapter.confirmClientPayment!({
+      providerRef: sub.providerSubscriptionId,
+      payload: { paymentId: confirmation.paymentId, signature: confirmation.signature, kind: 'subscription' },
+    });
+    if (!result.confirmed) throw new InvalidPaymentSignatureError(sub.provider);
     return this.refreshSubscription(projectId, id);
   }
 
@@ -318,8 +380,12 @@ export class ProjectPaymentService {
     switch (event.type) {
       case 'payment.succeeded':
       case 'payment.failed': {
-        const order = event.orderRef ? await this.orderDAO.findByConnectionAndProviderOrderId(connectionId, event.orderRef) : null;
-        if (!order) return 'no matching order';
+        const order = event.reference?.kind === 'project_order'
+          ? await this.orderDAO.findById(event.reference.id)
+          : event.orderRef
+            ? await this.orderDAO.findByConnectionAndProviderOrderId(connectionId, event.orderRef)
+            : null;
+        if (!order || order.connectionId !== connectionId) return 'no matching order';
         const to = event.type === 'payment.succeeded' ? 'paid' : 'failed';
         const updated = await this.applyOrderStatus(order, to, event.paymentId);
         return `order ${order.id} → ${updated.status}`;
@@ -329,11 +395,15 @@ export class ProjectPaymentService {
       case 'subscription.cancelled':
       case 'subscription.halted':
       case 'subscription.completed': {
-        const sub = event.subscriptionRef ? await this.subscriptionDAO.findByConnectionAndProviderSubscriptionId(connectionId, event.subscriptionRef) : null;
-        if (!sub) return 'no matching subscription';
+        const sub = event.reference?.kind === 'project_subscription'
+          ? await this.subscriptionDAO.findById(event.reference.id)
+          : event.subscriptionRef
+            ? await this.subscriptionDAO.findByConnectionAndProviderSubscriptionId(connectionId, event.subscriptionRef)
+            : null;
+        if (!sub || sub.connectionId !== connectionId) return 'no matching subscription';
         const map: Record<string, ProjectSubscription['status']> = {
           'subscription.activated': 'active', 'subscription.charged': 'active',
-          'subscription.cancelled': 'cancelled', 'subscription.halted': 'halted', 'subscription.completed': 'completed',
+          'subscription.cancelled': 'canceled', 'subscription.halted': 'past_due', 'subscription.completed': 'completed',
         };
         const to = map[event.type];
         if (!canMoveSubscription(sub.status, to)) return `subscription ${sub.id} already ${sub.status}`;
@@ -341,7 +411,7 @@ export class ProjectPaymentService {
           status: to,
           currentPeriodStart: event.subscriptionPeriod?.start,
           currentPeriodEnd: event.subscriptionPeriod?.end,
-          canceledAt: to === 'cancelled' ? new Date() : undefined,
+          canceledAt: to === 'canceled' ? new Date() : undefined,
         });
         return `subscription ${sub.id} → ${to}`;
       }
@@ -350,10 +420,22 @@ export class ProjectPaymentService {
     }
   }
 
-  private async applyOrderStatus(order: ProjectOrder, to: 'pending' | 'paid' | 'failed', paymentId?: string): Promise<ProjectOrder> {
+  private async applyOrderStatus(order: ProjectOrder, to: 'pending' | 'paid' | 'failed' | 'refunded', paymentId?: string): Promise<ProjectOrder> {
     if (!canMovePayment(order.status, to)) return order;
     if (to === 'paid') {
-      return this.orderDAO.update(order.id, { status: 'paid', paidAt: new Date(), providerPaymentId: paymentId ?? undefined });
+      return this.prisma.$transaction(async (tx) => {
+        const txOrderDAO = new ProjectOrderDAO(tx);
+        const txPaymentDAO = new ProjectPaymentDAO(tx);
+        const updated = await txOrderDAO.update(order.id, { status: 'paid', paidAt: new Date(), fulfilledAt: new Date(), providerPaymentId: paymentId ?? undefined });
+        if (paymentId && !(await txPaymentDAO.findByProviderPaymentId(paymentId))) {
+          await txPaymentDAO.create({
+            projectId: order.projectId, kind: 'order', provider: order.provider,
+            providerPaymentId: paymentId, amount: order.amount, currencyCode: order.currencyCode,
+            projectOrderId: order.id,
+          });
+        }
+        return updated;
+      });
     }
     return this.orderDAO.update(order.id, { status: to });
   }

@@ -1,15 +1,18 @@
 import type { PrismaClient } from '@/generated/prisma';
 import type { PrismaTransaction } from '@/lib/common/dao';
-import { explainSelection } from '@/lib/common/payments/core/selector';
+import { explainSelection, type ProviderCandidate } from '@/lib/common/payments/core/selector';
+import { supports } from '@/lib/common/payments/core/contracts/features';
 import type {
   CheckoutMode,
   PaymentFlow,
   ProviderKey,
-} from '@/lib/common/payments/core/types';
+} from '@/lib/common/payments/core/contracts/provider';
 import type { SelectionExplanation, SelectionInput, SelectionResult } from '@/lib/common/payments/core/selector';
-import { ProviderSettingsService } from '@/lib/common/services/payments/provider-settings-service';
+import { ProviderRulesService } from '@/lib/common/services/payments/provider-rules-service';
 import { CountryService } from '@/lib/common/services/catalog/country-service';
-import { PLATFORM_RECEIVER_COUNTRY, getPaymentEnvironment } from '@/lib/common/services/payments/payment-config';
+import { PLATFORM_RECEIVER_COUNTRY } from '@/lib/common/services/payments/payment-constants';
+import { getPaymentEnvironment } from '@/config/payments/env';
+import { getPlatformCredentials } from '@/config/payments/platform-credentials';
 
 export interface SimulateInput {
   flow: PaymentFlow;
@@ -41,13 +44,29 @@ export interface ProjectMapRow {
   eligible: { provider: ProviderKey; label: string; supportsSubscriptions: boolean }[];
 }
 
+function platformAvailable(provider: ProviderKey): boolean {
+  try {
+    getPlatformCredentials(provider);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class RubricService {
-  private providerSettingsService: ProviderSettingsService;
+  private providerRulesService: ProviderRulesService;
   private countryService: CountryService;
 
   constructor(private readonly prisma: PrismaClient | PrismaTransaction) {
-    this.providerSettingsService = new ProviderSettingsService(prisma);
+    this.providerRulesService = new ProviderRulesService(prisma);
     this.countryService = new CountryService(prisma);
+  }
+
+  private candidates(flow: PaymentFlow): Promise<ProviderCandidate[]> {
+    // Rubric is generic — project availability (a creator's connection) can't be known here
+    return this.providerRulesService.getCandidates(flow, (p) =>
+      flow === 'platform' ? platformAvailable(p) : true,
+    );
   }
 
   async simulate(input: SimulateInput): Promise<SimulateResult> {
@@ -62,8 +81,8 @@ export class RubricService {
     }
 
     const resolved: SelectionInput = { ...input, receiverCountry, currency };
-    const providers = await this.providerSettingsService.getEffectiveCapabilities(input.flow);
-    const explanation = explainSelection(resolved, providers);
+    const candidates = await this.candidates(input.flow);
+    const explanation = explainSelection(resolved, candidates);
 
     return {
       input: resolved,
@@ -72,41 +91,41 @@ export class RubricService {
         ? null
         : {
             provider: explanation.result.provider,
-            credentialsSource: input.flow === 'platform' ? 'platform env credentials' : 'decrypted PaymentConnection credentials',
+            credentialsSource: input.flow === 'platform' ? 'platform env credentials' : 'decrypted project connection credentials',
             environment: getPaymentEnvironment(),
           },
     };
   }
 
   async platformMap(): Promise<PlatformMapRow[]> {
-    const [countries, providers] = await Promise.all([
+    const [countries, candidates] = await Promise.all([
       this.countryService.listCountries(),
-      this.providerSettingsService.getEffectiveCapabilities('platform'),
+      this.candidates('platform'),
     ]);
     return countries.map((c) => {
-      const base = { flow: 'platform' as const, payerCountry: c.code, receiverCountry: PLATFORM_RECEIVER_COUNTRY, currency: c.currencyCode };
+      const base = { flow: 'platform' as const, payerCountry: c.countryCode, receiverCountry: PLATFORM_RECEIVER_COUNTRY, currency: c.currencyCode };
       return {
-        countryCode: c.code,
+        countryCode: c.countryCode,
         countryName: c.name,
         currency: c.currencyCode,
-        oneTime: explainSelection({ ...base, mode: 'one_time' }, providers).result,
-        subscription: explainSelection({ ...base, mode: 'subscription' }, providers).result,
+        oneTime: explainSelection({ ...base, mode: 'one_time' }, candidates).result,
+        subscription: explainSelection({ ...base, mode: 'subscription' }, candidates).result,
       };
     });
   }
 
   async projectMap(): Promise<ProjectMapRow[]> {
-    const [countries, providers] = await Promise.all([
+    const [countries, candidates] = await Promise.all([
       this.countryService.listCountries(),
-      this.providerSettingsService.getEffectiveCapabilities('project'),
+      this.candidates('project'),
     ]);
     return countries.map((c) => {
       const explanation = explainSelection(
-        { flow: 'project', mode: 'one_time', payerCountry: c.code, receiverCountry: c.code, currency: c.currencyCode },
-        providers
+        { flow: 'project', mode: 'one_time', payerCountry: c.countryCode, receiverCountry: c.countryCode, currency: c.currencyCode },
+        candidates,
       );
       return {
-        countryCode: c.code,
+        countryCode: c.countryCode,
         countryName: c.name,
         currency: c.currencyCode,
         eligible: explanation.traces
@@ -114,10 +133,12 @@ export class RubricService {
           .map((t) => ({
             provider: t.provider,
             label: t.label,
-            supportsSubscriptions: providers.find((p) => p.key === t.provider)?.supportsSubscriptions ?? false,
+            supportsSubscriptions:
+              candidates.find((p) => p.manifest.key === t.provider)
+                ? supports(candidates.find((p) => p.manifest.key === t.provider)!.manifest, 'subscription.create')
+                : false,
           })),
       };
     });
   }
 }
-

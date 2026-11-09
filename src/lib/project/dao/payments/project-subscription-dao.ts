@@ -5,7 +5,7 @@ import type { PrismaClient, ProjectSubscription, Prisma } from '@/generated/pris
 import type { ProjectSubscriptionCreateInput, ProjectSubscriptionUpdateInput, ProjectSubscriptionListOptions } from './types';
 
 const projectSubscriptionListInclude = {
-  offering: true,
+  projectOfferingPrice: { include: { offering: true } },
 } satisfies Prisma.ProjectSubscriptionInclude;
 
 export type ProjectSubscriptionWithOffering = Prisma.ProjectSubscriptionGetPayload<{
@@ -53,7 +53,7 @@ export class ProjectSubscriptionDAO {
 
   async existsForOffering(offeringId: string): Promise<boolean> {
     const count = await this.prisma.projectSubscription.count({
-      where: { offeringId },
+      where: { projectOfferingPrice: { offeringId } },
     });
     return count > 0;
   }

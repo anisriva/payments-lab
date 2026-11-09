@@ -2,7 +2,7 @@ export const runtime = 'nodejs';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/common/connectors/prisma';
 import { handleRouteError } from '@/lib/common/utils/api-error-handler';
-import { PaymentConnectionService } from '@/lib/project/services/payments/payment-connection-service';
+import { ProjectPaymentConnectionService } from '@/lib/project/services/payments/project-payment-connection-service';
 import type { ApiResponse } from '@/types/common';
 
 export async function DELETE(
@@ -11,7 +11,7 @@ export async function DELETE(
 ): Promise<NextResponse<ApiResponse<null>>> {
   try {
     const { id, connectionId } = await params;
-    await new PaymentConnectionService(prisma).disconnect(id, connectionId);
+    await new ProjectPaymentConnectionService(prisma).disconnect(id, connectionId);
     return NextResponse.json({ success: true, data: null }, { status: 200 });
   } catch (error: unknown) {
     return handleRouteError(error, 'DELETE /api/platform/projects/[id]/payments/connections/[connectionId]');

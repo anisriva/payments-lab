@@ -6,6 +6,9 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { planPriceUpdateSchema, type PlanPriceUpdate } from '@/schemas/platform/catalog/plan-price.schema';
 import { useUpdatePlanPrice } from '@/hooks/platform/catalog/use-update-plan-price';
 import { useDeletePlanPrice } from '@/hooks/platform/catalog/use-delete-plan-price';
+import { supports } from '@/lib/common/payments/core/contracts/features';
+import { getClientAdapter } from '@/lib/common/payments/core/registry.client';
+import { isProviderKey } from '@/lib/common/payments/core/registry.client';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
@@ -25,7 +28,7 @@ export function PlanPriceActiveSwitch({ id, checked }: { id: string; checked: bo
   );
 }
 
-export function PlanPriceActions({ id, displayName }: { id: string; displayName: string }) {
+export function PlanPriceActions({ id, displayName, providerKeys = [] }: { id: string; displayName: string; providerKeys?: string[] }) {
   const router = useRouter();
   const update = useUpdatePlanPrice(id);
   const del = useDeletePlanPrice(id);
@@ -55,7 +58,20 @@ export function PlanPriceActions({ id, displayName }: { id: string; displayName:
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete plan price?</AlertDialogTitle>
-            <AlertDialogDescription>This removes it from Payments Lab. Any plan already created in the payment provider stays there unused — providers don&apos;t allow deleting plans.</AlertDialogDescription>
+            <AlertDialogDescription><span className="block">This removes it from Payments Lab. Any plan already created in the payment provider stays there unused — providers don&apos;t allow deleting plans.{providerKeys.filter((k) => {
+                  const m = isProviderKey(k) ? getClientAdapter(k).manifest : null;
+                  return m && !supports(m, 'subscription_plan.disable');
+                }).map((k) => {
+                  const m = getClientAdapter(k as never).manifest;
+                  const step = (m.features['subscription_plan.disable'] as { manual?: { title: string; steps: string[] } }).manual;
+                  return step ? (
+                    <span key={k} className="mt-2 block text-sm">
+                      <span className="block font-medium">{m.brand.name}: {step.title}</span>
+                      <ol className="list-decimal pl-5">{step.steps.map((st, i) => <li key={i}>{st}</li>)}</ol>
+                    </span>
+                  ) : null;
+                })}
+              </span></AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>

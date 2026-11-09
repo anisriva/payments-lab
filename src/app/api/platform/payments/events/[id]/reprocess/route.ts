@@ -13,7 +13,7 @@ export async function POST(
   try {
     const { id } = await params;
     const service = new PaymentWebhookService(prisma);
-    await service.reprocess(id);
+    await service.reprocessPlatformEvent(id);
     return NextResponse.json({ success: true, data: null }, { status: 200 });
   } catch (error: unknown) {
     return handleRouteError(error, 'POST /api/platform/payments/events/[id]/reprocess');

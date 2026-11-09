@@ -8,6 +8,7 @@ import { z } from 'zod';
  * - Form: subscription plan cards
  */
 export const platformSubscriptionCreateSchema = z.object({
+  projectId: z.string().min(1),
   gateway: z.string().min(1),
   payerCountry: z.string().length(2),
   planPriceId: z.string().uuid(),

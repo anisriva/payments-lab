@@ -7,7 +7,7 @@ export class PaymentValidationError extends Error {
 
 export class ProviderNotImplementedError extends Error {
   constructor(provider: string) {
-    super(`Payment provider "${provider}" is not available yet`);
+    super(`Unknown payment provider: ${provider}`);
     this.name = 'ProviderNotImplementedError';
   }
 }
@@ -34,7 +34,7 @@ export class PaymentProviderError extends Error {
   public readonly cause?: unknown;
 
   constructor(provider: string, message: string, cause?: unknown) {
-    super(`Razorpay request failed: ${message}`);
+    super(`${provider} request failed: ${message}`);
     this.name = 'PaymentProviderError';
     this.provider = provider;
     this.cause = cause;
@@ -45,5 +45,12 @@ export class PaymentCapabilityNotSupportedError extends Error {
   constructor(provider: string, capability: string) {
     super(`${provider} does not support ${capability}`);
     this.name = 'PaymentCapabilityNotSupportedError';
+  }
+}
+
+export class PlatformCredentialsMissingError extends Error {
+  constructor(provider: string, envVars: string[]) {
+    super(`Platform credentials for ${provider} are missing — set: ${envVars.join(', ')}`);
+    this.name = 'PlatformCredentialsMissingError';
   }
 }
