@@ -1,41 +1,20 @@
 import type {
   PaymentProvider,
-  PaymentEnvironment,
-  ProviderProductRefType,
   Prisma,
 } from '@/generated/prisma';
 import type { PaginationInput, SortOptions } from '@/types/common/pagination';
 
-export interface ProviderProductCreateInput {
-  scope: string;
-  provider: PaymentProvider;
-  environment: PaymentEnvironment;
-  refType: ProviderProductRefType;
-  refId: string;
-  providerRef: string;
-}
+// ── Provider rules ──
 
-export interface ProviderEventCreateInput {
-  provider: PaymentProvider;
-  scope: string;
-  providerEventId: string;
-  eventType: string;
-  headers: Prisma.InputJsonValue;
-  rawBody: string;
-}
-
-export interface PaymentProviderSettingUpsertInput {
+export interface ProviderRuleUpsertInput {
   isEnabled?: boolean;
-  receiverCountries: string[];
-  payerCountries: string[];
-  currencies: string[];
-}
-
-export interface PaymentProviderSettingUpdateInput {
-  isEnabled?: boolean;
+  priority?: number;
   receiverCountries?: string[];
   payerCountries?: string[];
   currencies?: string[];
+}
+
+export interface ProviderRuleUpdateInput extends ProviderRuleUpsertInput {
   webhookRef?: string | null;
   webhookRegisteredAt?: Date | null;
   webhookError?: string | null;
@@ -43,9 +22,20 @@ export interface PaymentProviderSettingUpdateInput {
   validatedAt?: Date | null;
 }
 
-export interface PaymentProviderSettingListOptions {
+export interface ProviderRuleListOptions {
   pagination?: PaginationInput;
   sort?: SortOptions;
+}
+
+// ── Provider events ──
+
+export interface ProviderEventCreateInput {
+  provider: PaymentProvider;
+  connectionId?: string; // project events only
+  providerEventId: string;
+  eventType: string;
+  headers: Prisma.InputJsonValue;
+  rawBody: string;
 }
 
 export interface ProviderEventListOptions {
@@ -53,8 +43,7 @@ export interface ProviderEventListOptions {
   sort?: SortOptions;
   filters?: {
     provider?: PaymentProvider;
-    scope?: string;
-    scopes?: string[];
-    excludeScope?: string;
+    connectionId?: string;
+    connectionIds?: string[];
   };
 }

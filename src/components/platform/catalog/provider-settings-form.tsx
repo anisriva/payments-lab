@@ -54,7 +54,7 @@ export function ProviderSettingsForm({
 }: {
   provider: string;
   flow: string;
-  initial: { isEnabled: boolean; receiverCountries: CapList; payerCountries: CapList; currencies: CapList };
+  initial: { isEnabled: boolean; priority: number; receiverCountries: CapList; payerCountries: CapList; currencies: CapList };
   countries: Country[];
   currencies: string[];
 }) {
@@ -64,6 +64,7 @@ export function ProviderSettingsForm({
     resolver: zodResolver(providerSettingUpdateSchema),
     defaultValues: {
       isEnabled: initial.isEnabled,
+      priority: initial.priority,
       receiverCountries: toFormList(initial.receiverCountries),
       payerCountries: toFormList(initial.payerCountries),
       currencies: toFormList(initial.currencies),
@@ -76,6 +77,7 @@ export function ProviderSettingsForm({
           update.mutate(
             {
               isEnabled: data.isEnabled,
+              priority: data.priority,
               receiverCountries: data.receiverCountries,
               payerCountries: data.payerCountries,
               currencies: data.currencies,
@@ -88,22 +90,28 @@ export function ProviderSettingsForm({
         <FormField control={form.control} name="isEnabled" render={({ field }) => (
           <FormItem className="flex items-center gap-3">
             <FormControl><Switch checked={field.value ?? true} onCheckedChange={field.onChange} /></FormControl>
-            <FormLabel className="!mt-0">Enabled</FormLabel>
+            <FormLabel className="mt-0!">Enabled</FormLabel>
           </FormItem>
         )} />
         <FormField control={form.control} name="receiverCountries" render={({ field }) => (
           <FormItem><FormLabel>Receiver countries</FormLabel>
             <FormControl>
               <FieldToggleGroup value={field.value} onChange={field.onChange}
-                options={countries.map((c) => ({ value: c.code, label: c.code }))} />
+                options={countries.map((c) => ({ value: c.countryCode, label: c.countryCode }))} />
             </FormControl><FormMessage /></FormItem>
         )} />
         <FormField control={form.control} name="payerCountries" render={({ field }) => (
           <FormItem><FormLabel>Payer countries</FormLabel>
             <FormControl>
               <FieldToggleGroup value={field.value} onChange={field.onChange}
-                options={countries.map((c) => ({ value: c.code, label: c.code }))} />
+                options={countries.map((c) => ({ value: c.countryCode, label: c.countryCode }))} />
             </FormControl><FormMessage /></FormItem>
+        )} />
+        <FormField control={form.control} name="priority" render={({ field }) => (
+          <FormItem><FormLabel>Priority (lower wins)</FormLabel>
+            <FormControl><input type="number" min={0} className="w-24 rounded-md border px-2 py-1 text-sm"
+              value={field.value ?? 100} onChange={(e) => field.onChange(e.target.valueAsNumber)} /></FormControl>
+            <FormMessage /></FormItem>
         )} />
         <FormField control={form.control} name="currencies" render={({ field }) => (
           <FormItem><FormLabel>Currencies</FormLabel>

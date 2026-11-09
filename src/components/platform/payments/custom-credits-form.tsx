@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from '@/components/ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 
-export function CustomCreditsForm({ gateway, payer, rateMinor, currencyCode }: { gateway: string; payer: string; rateMinor: number; currencyCode: string }) {
+export function CustomCreditsForm({ gateway, payer, projectId, rateMinor, currencyCode }: { gateway: string; payer: string; projectId: string; rateMinor: number; currencyCode: string }) {
   const start = useStartCreditPurchase();
   const confirm = useConfirmCreditPurchase();
   const flow = useCheckoutFlow();

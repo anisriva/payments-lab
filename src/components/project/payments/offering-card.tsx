@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Form, FormControl, FormField, FormItem, FormMessage } from '@/components/ui/form';
 import type { ProjectOffering } from '@/generated/prisma';
 
-export function OfferingCard({ projectId, offering, buyer }: { projectId: string; offering: ProjectOffering; buyer: string }) {
+export function OfferingCard({ projectId, offering, buyer, provider }: { projectId: string; offering: ProjectOffering & { prices?: import('@/generated/prisma').ProjectOfferingPrice[] }; buyer: string; provider: string }) {
   const startOrder = useStartProjectOrder(projectId);
   const confirmOrder = useConfirmProjectOrder(projectId);
   const startSub = useStartProjectSubscription(projectId);
@@ -22,18 +22,18 @@ export function OfferingCard({ projectId, offering, buyer }: { projectId: string
   const flow = useCheckoutFlow();
   const form = useForm<ProjectOrderCreate>({
     resolver: zodResolver(projectOrderCreateSchema),
-    defaultValues: { provider: 'razorpay', offeringId: offering.id, buyerEmail: buyer, amountMinor: offering.amountMinor },
+    defaultValues: { provider, offeringId: offering.id, buyerEmail: buyer, amountMinor: offering.prices?.[0]?.amount ?? 0 },
   });
 
-  if (offering.priceType === 'recurring') {
+  if ((offering.prices?.[0]?.priceType ?? 'fixed') === 'recurring') {
     return (
       <Card>
         <CardHeader><CardTitle>{offering.name}</CardTitle><CardDescription>Subscription</CardDescription></CardHeader>
-        <CardContent><p className="text-2xl font-semibold">{formatMoney(offering.amountMinor, offering.currencyCode)}<span className="text-sm font-normal text-muted-foreground"> / {offering.interval}</span></p></CardContent>
+        <CardContent><p className="text-2xl font-semibold">{formatMoney(offering.prices?.[0]?.amount ?? 0, offering.prices?.[0]?.currencyCode ?? '')}<span className="text-sm font-normal text-muted-foreground"> / {offering.prices?.[0]?.billingMode}</span></p></CardContent>
         <CardFooter>
           <Button disabled={startSub.isPending} onClick={() =>
             flow.run({
-              start: () => startSub.mutateAsync({ provider: 'razorpay', offeringId: offering.id, buyerEmail: buyer }),
+              start: () => startSub.mutateAsync({ provider, offeringId: offering.id, buyerEmail: buyer }),
               confirm: confirmSub.mutateAsync,
               recordUrl: (id) => `/api/project/${projectId}/payments/subscriptions/${id}`,
             })
@@ -43,7 +43,7 @@ export function OfferingCard({ projectId, offering, buyer }: { projectId: string
     );
   }
 
-  if (offering.priceType === 'custom') {
+  if ((offering.prices?.[0]?.priceType ?? 'fixed') === 'custom') {
     return (
       <Card>
         <CardHeader><CardTitle>{offering.name}</CardTitle><CardDescription>Pay what you want</CardDescription></CardHeader>
@@ -59,11 +59,11 @@ export function OfferingCard({ projectId, offering, buyer }: { projectId: string
               <FormField control={form.control} name="amountMinor" render={({ field }) => (
                 <FormItem>
                   <FormControl>
-                    <Input type="number" step="0.01" min={offering.amountMinor / 100}
+                    <Input type="number" step="0.01" min={offering.prices?.[0]?.amount ?? 0 / 100}
                       value={Number.isNaN(field.value) ? '' : (field.value ?? 0) / 100}
                       onChange={(e) => field.onChange(Number.isNaN(e.target.valueAsNumber) ? undefined : Math.round(e.target.valueAsNumber * 100))} />
                   </FormControl>
-                  <p className="text-sm text-muted-foreground">min {formatMoney(offering.amountMinor, offering.currencyCode)}</p>
+                  <p className="text-sm text-muted-foreground">min {formatMoney(offering.prices?.[0]?.amount ?? 0, offering.prices?.[0]?.currencyCode ?? '')}</p>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -78,11 +78,11 @@ export function OfferingCard({ projectId, offering, buyer }: { projectId: string
   return (
     <Card>
       <CardHeader><CardTitle>{offering.name}</CardTitle><CardDescription>One-time</CardDescription></CardHeader>
-      <CardContent><p className="text-2xl font-semibold">{formatMoney(offering.amountMinor, offering.currencyCode)}</p></CardContent>
+      <CardContent><p className="text-2xl font-semibold">{formatMoney(offering.prices?.[0]?.amount ?? 0, offering.prices?.[0]?.currencyCode ?? '')}</p></CardContent>
       <CardFooter>
         <Button disabled={startOrder.isPending} onClick={() =>
           flow.run({
-            start: () => startOrder.mutateAsync({ provider: 'razorpay', offeringId: offering.id, buyerEmail: buyer }),
+            start: () => startOrder.mutateAsync({ provider, offeringId: offering.id, buyerEmail: buyer }),
             confirm: confirmOrder.mutateAsync,
             recordUrl: (id) => `/api/project/${projectId}/payments/orders/${id}`,
           })

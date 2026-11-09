@@ -2,11 +2,13 @@
 
 import { usePathname, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { runCheckout } from '@/lib/common/payments/client/run-checkout';
-import type { CheckoutInstruction } from '@/lib/common/payments/core/types';
+import { getClientAdapter } from '@/lib/common/payments/core/registry.client';
+import type { CheckoutInstruction } from '@/lib/common/payments/core/contracts/checkout';
+import type { ProviderKey } from '@/lib/common/payments/core/contracts/provider';
 
 interface StartedResult {
   recordId: string;
+  provider: ProviderKey;
   instruction: CheckoutInstruction;
 }
 
@@ -26,8 +28,16 @@ export function useCheckoutFlow() {
       return; // start mutation already toasted the error
     }
 
-    await runCheckout(started.instruction, {
-      onSuccess: async ({ paymentId, signature }) => {
+    if (started.instruction.kind === 'redirect') {
+      window.location.assign(started.instruction.url);
+      return;
+    }
+    const launcher = getClientAdapter(started.provider).client;
+    await launcher.launch(started.instruction, {
+      onSuccess: async (payload) => {
+        const parsed = launcher.confirmationSchema.safeParse(payload);
+        if (!parsed.success) return;
+        const { paymentId, signature } = parsed.data as { paymentId: string; signature: string };
         try {
           await input.confirm({ id: started.recordId, paymentId, signature });
         } catch {
@@ -37,7 +47,9 @@ export function useCheckoutFlow() {
           '/checkout/return?url=' +
             encodeURIComponent(input.recordUrl(started.recordId)) +
             '&back=' +
-            encodeURIComponent(pathname)
+            encodeURIComponent(pathname) +
+            '&provider=' +
+            started.provider
         );
       },
       onDismiss: () => toast('Checkout closed — the payment stays pending'),

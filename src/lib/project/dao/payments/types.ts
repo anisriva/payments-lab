@@ -1,7 +1,7 @@
 import type {
-  BillingInterval,
+  BillingMode,
   Prisma,
-  OfferingPriceType,
+  ProjectOfferingPriceType,
   PaymentEnvironment,
   PaymentProvider,
   PaymentStatus,
@@ -9,7 +9,7 @@ import type {
 } from '@/generated/prisma';
 import type { PaginationInput, SortOptions } from '@/types/common/pagination';
 
-export interface PaymentConnectionUpsertInput {
+export interface ProjectPaymentConnectionUpsertInput {
   id: string;
   projectId: string;
   provider: PaymentProvider;
@@ -20,7 +20,7 @@ export interface PaymentConnectionUpsertInput {
   verifiedAt?: Date | null;
 }
 
-export interface PaymentConnectionUpdateInput {
+export interface ProjectPaymentConnectionUpdateInput {
   credentialsEnc?: string;
   displayHint?: string;
   isEnabled?: boolean;
@@ -36,25 +36,45 @@ export interface PaymentConnectionUpdateInput {
 export interface ProjectOfferingCreateInput {
   id?: string;
   projectId: string;
+  module: string;
+  moduleItemId: string;
   name: string;
-  priceType: OfferingPriceType;
-  amountMinor: number;
-  currencyCode: string;
-  interval?: BillingInterval | null;
+  description?: string | null;
   isActive?: boolean;
 }
 
 export interface ProjectOfferingUpdateInput {
   name?: string;
+  description?: string | null;
   isActive?: boolean;
+}
+
+export interface ProjectOfferingPriceCreateInput {
+  offeringId: string;
+  marketId?: string | null;
+  priceType: ProjectOfferingPriceType;
+  amount: number;
+  currencyCode: string;
+  billingMode?: BillingMode | null;
+  providerPlanRefs?: Prisma.InputJsonValue;
+  isActive?: boolean;
+}
+
+export interface ProjectOfferingPriceUpdateInput {
+  amount?: number;
+  isActive?: boolean;
+  providerPlanRefs?: Prisma.InputJsonValue;
 }
 
 export interface ProjectOrderCreateInput {
   projectId: string;
+  projectUserId: string;
   connectionId: string;
-  offeringId: string;
+  projectOfferingPriceId: string;
   buyerEmail: string;
-  amountMinor: number;
+  quantity?: number;
+  unitAmount: number;
+  amount: number;
   currencyCode: string;
   provider: PaymentProvider;
   environment: PaymentEnvironment;
@@ -71,20 +91,23 @@ export interface ProjectOrderUpdateInput {
   status?: PaymentStatus;
   failureReason?: string | null;
   paidAt?: Date | null;
+  fulfilledAt?: Date | null;
 }
 
 export interface ProjectSubscriptionCreateInput {
   projectId: string;
+  projectUserId: string;
   connectionId: string;
-  offeringId: string;
+  projectOfferingPriceId: string;
   buyerEmail: string;
+  quantity?: number;
   provider: PaymentProvider;
   environment: PaymentEnvironment;
   providerSubscriptionId?: string | null;
   status?: SubscriptionStatus;
   currentPeriodStart?: Date | null;
   currentPeriodEnd?: Date | null;
-  cancelAtCycleEnd?: boolean;
+  cancelAtPeriodEnd?: boolean;
   canceledAt?: Date | null;
   failureReason?: string | null;
 }
@@ -94,12 +117,12 @@ export interface ProjectSubscriptionUpdateInput {
   status?: SubscriptionStatus;
   currentPeriodStart?: Date | null;
   currentPeriodEnd?: Date | null;
-  cancelAtCycleEnd?: boolean;
+  cancelAtPeriodEnd?: boolean;
   canceledAt?: Date | null;
   failureReason?: string | null;
 }
 
-export interface PaymentConnectionListOptions {
+export interface ProjectPaymentConnectionListOptions {
   pagination?: PaginationInput;
   sort?: SortOptions;
 }

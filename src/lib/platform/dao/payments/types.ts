@@ -1,84 +1,71 @@
 import type {
-  BillingInterval,
-  CreditPurchaseKind,
+  BillingMode,
   PaymentEnvironment,
   PaymentKind,
   PaymentProvider,
   PaymentStatus,
+  Prisma,
   SubscriptionStatus,
 } from '@/generated/prisma';
 import type { PaginationInput, SortOptions } from '@/types/common/pagination';
 
 export interface PlatformPlanPriceCreateInput {
-  planKey: string;
-  displayName: string;
-  interval: BillingInterval;
-  amountMinor: number;
+  planId: string;
+  marketId: string;
+  billingMode: BillingMode;
+  unitAmount: number;
   currencyCode: string;
+  providerPlanRefs?: Prisma.InputJsonValue;
   isActive?: boolean;
 }
 
 export interface PlatformPlanPriceUpdateInput {
-  displayName?: string;
   isActive?: boolean;
+  providerPlanRefs?: Prisma.InputJsonValue;
 }
 
 export interface PlatformPlanPriceListOptions {
   pagination?: PaginationInput;
   sort?: SortOptions;
-  filters?: {
-    isActive?: boolean;
-    currencyCode?: string;
-  };
+  filters?: { isActive?: boolean; currencyCode?: string; marketId?: string };
 }
 
-export interface AiCreditRateCreateInput {
-  currencyCode: string;
-  rateMinor: number;
-  isActive?: boolean;
+export interface PlatformSubscriptionCreateInput {
+  projectId: string;
+  platformUserId: string;
+  platformPlanPriceId?: string;
+  platformOfferingPriceId?: string;
+  quantity?: number;
+  provider: PaymentProvider;
+  environment: PaymentEnvironment;
+  providerSubscriptionId?: string | null;
+  status?: SubscriptionStatus;
 }
 
-export interface AiCreditRateUpdateInput {
-  rateMinor?: number;
-  isActive?: boolean;
+export interface PlatformSubscriptionUpdateInput {
+  providerSubscriptionId?: string | null;
+  status?: SubscriptionStatus;
+  currentPeriodStart?: Date | null;
+  currentPeriodEnd?: Date | null;
+  cancelAtPeriodEnd?: boolean;
+  canceledAt?: Date | null;
+  trialEnd?: Date | null;
+  failureReason?: string | null;
 }
 
-export interface AiCreditRateListOptions {
+export interface PlatformSubscriptionListOptions {
   pagination?: PaginationInput;
   sort?: SortOptions;
-  filters?: {
-    currencyCode?: string;
-    isActive?: boolean;
-  };
+  filters?: { provider?: PaymentProvider };
 }
 
-export interface SubscriptionCreateInput {
-  platformPlanPriceId: string;
-  provider: PaymentProvider;
-  environment: PaymentEnvironment;
-  providerSubscriptionId?: string | null;
-  status?: SubscriptionStatus;
-  currentPeriodStart?: Date | null;
-  currentPeriodEnd?: Date | null;
-  cancelAtCycleEnd?: boolean;
-  canceledAt?: Date | null;
-  failureReason?: string | null;
-}
-
-export interface SubscriptionUpdateInput {
-  providerSubscriptionId?: string | null;
-  status?: SubscriptionStatus;
-  currentPeriodStart?: Date | null;
-  currentPeriodEnd?: Date | null;
-  cancelAtCycleEnd?: boolean;
-  canceledAt?: Date | null;
-  failureReason?: string | null;
-}
-
-export interface AiCreditPurchaseCreateInput {
-  kind: CreditPurchaseKind;
-  credits: number;
-  amountMinor: number;
+export interface PlatformOrderCreateInput {
+  projectId: string;
+  platformUserId: string;
+  platformOfferingPriceId: string;
+  quantity?: number;
+  unitAmount: number;
+  amount: number;
   currencyCode: string;
   provider: PaymentProvider;
   environment: PaymentEnvironment;
@@ -89,45 +76,57 @@ export interface AiCreditPurchaseCreateInput {
   paidAt?: Date | null;
 }
 
-export interface AiCreditPurchaseUpdateInput {
+export interface PlatformOrderUpdateInput {
   providerOrderId?: string | null;
   providerPaymentId?: string | null;
   status?: PaymentStatus;
   failureReason?: string | null;
   paidAt?: Date | null;
+  fulfilledAt?: Date | null;
 }
 
-export interface PaymentCreateInput {
+export interface PlatformOrderListOptions {
+  pagination?: PaginationInput;
+  sort?: SortOptions;
+  filters?: { provider?: PaymentProvider };
+}
+
+export interface PlatformPaymentCreateInput {
   kind: PaymentKind;
+  projectId?: string | null;
   provider: PaymentProvider;
   environment: PaymentEnvironment;
   providerPaymentId: string;
-  amountMinor: number;
+  amount: number;
   currencyCode: string;
-  aiCreditPurchaseId?: string | null;
-  subscriptionId?: string | null;
+  platformOrderId?: string | null;
+  platformSubscriptionId?: string | null;
 }
 
-export interface SubscriptionListOptions {
+export interface PlatformPaymentListOptions {
   pagination?: PaginationInput;
   sort?: SortOptions;
-  filters?: {
-    provider?: PaymentProvider;
-  };
+  filters?: { provider?: PaymentProvider };
 }
 
-export interface AiCreditPurchaseListOptions {
-  pagination?: PaginationInput;
-  sort?: SortOptions;
-  filters?: {
-    provider?: PaymentProvider;
-  };
+export interface PlatformOfferingCreateInput {
+  key: string;
+  name: string;
+  unitLabel?: string | null;
+  minQuantity?: number;
+  maxQuantity: number;
+  quantityStep?: number;
+  quickPicks?: number[];
+  isActive?: boolean;
 }
 
-export interface PaymentListOptions {
-  pagination?: PaginationInput;
-  sort?: SortOptions;
-  filters?: {
-    provider?: PaymentProvider;
-  };
+export interface PlatformOfferingPriceCreateInput {
+  offeringId: string;
+  marketId: string;
+  priceType: 'one_time' | 'recurring';
+  billingMode?: BillingMode | null;
+  unitAmount: number;
+  currencyCode: string;
+  providerPlanRefs?: Prisma.InputJsonValue;
+  isActive?: boolean;
 }

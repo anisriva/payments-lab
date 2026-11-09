@@ -78,6 +78,7 @@ export class ProjectOfferingDAO {
       where,
       orderBy,
       pagination,
+      include: { prices: true },
     });
   }
 }

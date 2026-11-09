@@ -1,114 +1,96 @@
 import type { PrismaClient, PaymentProvider } from '@/generated/prisma';
-import { PaymentProviderSettingDAO } from '@/lib/common/dao/payments/payment-provider-setting-dao';
-import { ProviderEventDAO } from '@/lib/common/dao/payments/provider-event-dao';
-import { ProviderSettingsService } from '@/lib/common/services/payments/provider-settings-service';
-import { WebhookRegistrationService } from '@/lib/common/services/payments/webhook-registration-service';
-import { getPaymentEnvironment, getPlatformProvider } from '@/lib/common/services/payments/payment-config';
-import { getPaymentsEnv } from '@/lib/common/config/payments-env';
-import { getCapabilities, getProfile, isProviderKey } from '@/lib/common/payments/core/factory';
+import { PlatformProviderRuleDAO } from '@/lib/platform/dao/payments/platform-provider-rule-dao';
+import { PlatformProviderEventDAO } from '@/lib/platform/dao/payments/platform-provider-event-dao';
+import { ProviderRulesService } from '@/lib/common/services/payments/provider-rules-service';
+import { runConnectionChecks, type ValidationReport } from '@/lib/common/payments/core/connection-checks';
+import { webhookUrlFor } from '@/lib/common/services/payments/payment-webhook-service';
+import { getPlatformProvider, PLATFORM_RECEIVER_COUNTRY } from '@/lib/common/services/payments/payment-config';
+import { getAppBaseUrl } from '@/config/payments/env';
+import { getPlatformCredentials } from '@/config/payments/platform-credentials';
+import { getManifest, isProviderKey } from '@/lib/common/payments/core/registry.server';
 import { ProviderNotImplementedError } from '@/lib/common/payments/core/errors';
-import type { ProviderKey, ValidationReport } from '@/lib/common/payments/core/types';
+import type { ProviderKey } from '@/lib/common/payments/core/contracts/provider';
 
 function describe(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+function isPublicBaseUrl(): boolean {
+  try {
+    const host = new URL(getAppBaseUrl()).hostname;
+    return host !== 'localhost' && host !== '127.0.0.1' && !host.endsWith('.local');
+  } catch {
+    return false;
+  }
+}
+
+const CHECK_LABELS = {
+  receiver_country: 'Country supported',
+  key_mode: 'Key matches test/live mode',
+  keys_valid: 'Keys accepted by the provider',
+  subscriptions_available: 'Subscriptions available on this account',
+  webhook_registered: 'Webhook registered',
+} as const;
+
 export class PlatformProviderService {
-  private settingDAO: PaymentProviderSettingDAO;
-  private providerEventDAO: ProviderEventDAO;
-  private providerSettingsService: ProviderSettingsService;
-  private webhookRegistrationService: WebhookRegistrationService;
+  private ruleDAO: PlatformProviderRuleDAO;
+  private providerEventDAO: PlatformProviderEventDAO;
+  private providerRulesService: ProviderRulesService;
 
   constructor(private readonly prisma: PrismaClient) {
-    this.settingDAO = new PaymentProviderSettingDAO(prisma);
-    this.providerEventDAO = new ProviderEventDAO(prisma);
-    this.providerSettingsService = new ProviderSettingsService(prisma);
-    this.webhookRegistrationService = new WebhookRegistrationService(prisma);
+    this.ruleDAO = new PlatformProviderRuleDAO(prisma);
+    this.providerEventDAO = new PlatformProviderEventDAO(prisma);
+    this.providerRulesService = new ProviderRulesService(prisma);
   }
 
   async validate(provider: string): Promise<ValidationReport> {
     if (!isProviderKey(provider)) throw new ProviderNotImplementedError(provider);
-    const caps = getCapabilities(provider);
-    if (!caps.implemented || !caps.flows.includes('platform')) throw new ProviderNotImplementedError(provider);
-    const profile = getProfile(provider);
-    if (!profile) throw new ProviderNotImplementedError(provider);
+    const manifest = getManifest(provider);
+    if (!manifest.audiences.includes('platform')) throw new ProviderNotImplementedError(provider);
 
-    const report: ValidationReport = { checks: [], canSave: true };
-    const push = (key: string, status: 'pass' | 'fail' | 'warn' | 'skipped', detail: string) => {
-      const def = profile.validationChecks.find((d) => d.key === key)!;
-      report.checks.push({ key: def.key, label: def.label, blocking: def.blocking, status, detail });
-      if (def.blocking && status === 'fail') report.canSave = false;
-    };
-
-    push('receiver_country', 'skipped', 'Folio receives in India');
+    // A rules row is required — create code defaults when missing, never overwrite tab edits
+    await this.providerRulesService.ensureRule(provider, 'platform');
+    const rule = await this.providerRulesService.getRule(provider, 'platform');
 
     let adapter;
+    let credentials: { webhookSecret?: string };
     try {
-      adapter = getPlatformProvider(provider as ProviderKey);
-      push('key_mode', 'pass', `keys match ${getPaymentEnvironment()} mode`);
+      credentials = getPlatformCredentials(provider) as { webhookSecret?: string };
+      adapter = getPlatformProvider(provider);
     } catch (e) {
-      push('key_mode', 'fail', describe(e));
-      for (const key of ['keys_valid', 'subscriptions_available', 'webhook_registered']) push(key, 'skipped', '');
-      await this.persist(provider, report, {});
-      return report;
-    }
-
-    try {
-      if (!(await adapter.verifyCredentials())) throw new Error('rejected');
-      push('keys_valid', 'pass', 'accepted');
-    } catch (e) {
-      push('keys_valid', 'fail', e instanceof Error && e.message !== 'rejected' ? describe(e) : 'Razorpay rejected the credentials');
-      for (const key of ['subscriptions_available', 'webhook_registered']) push(key, 'skipped', '');
-      await this.persist(provider, report, {});
-      return report;
-    }
-
-    try {
-      if (!(await adapter.checkSubscriptionsAvailable())) throw new Error('unavailable');
-      push('subscriptions_available', 'pass', 'available');
-    } catch {
-      push('subscriptions_available', 'warn', 'Subscriptions are not enabled on this Razorpay account');
-    }
-
-    let webhookRef: string | null = null;
-    let webhookRegisteredAt: Date | null = null;
-    let webhookError: string | null = null;
-    const url = this.webhookRegistrationService.urlFor({ kind: 'platform' }, provider as ProviderKey);
-    try {
-      const secret = getPaymentsEnv().RAZORPAY_WEBHOOK_SECRET;
-      const result = await this.webhookRegistrationService.ensure({ adapter, profile, url, secret });
-      if (result.status === 'registered') {
-        webhookRef = result.webhookRef;
-        webhookRegisteredAt = new Date();
-        push('webhook_registered', 'pass', `Registered · ${result.events.length} events`);
-      } else {
-        push('webhook_registered', 'warn', result.reason);
+      const report: ValidationReport = { checks: [], canSave: false };
+      report.checks.push({ key: 'receiver_country', label: CHECK_LABELS.receiver_country, blocking: true, status: 'skipped', detail: '' });
+      report.checks.push({ key: 'key_mode', label: CHECK_LABELS.key_mode, blocking: true, status: 'fail', detail: describe(e) });
+      for (const key of ['keys_valid', 'subscriptions_available', 'webhook_registered'] as const) {
+        report.checks.push({ key, label: CHECK_LABELS[key], blocking: key === 'keys_valid', status: 'skipped', detail: '' });
       }
-    } catch (e) {
-      webhookError = describe(e);
-      push('webhook_registered', 'warn', webhookError);
+      await this.persist(provider, report, {});
+      return report;
     }
 
-    await this.persist(provider, report, { webhookRef, webhookRegisteredAt, webhookError });
+    const url = webhookUrlFor({ kind: 'platform' }, provider as ProviderKey, getAppBaseUrl());
+    const { report, webhook } = await runConnectionChecks(adapter, {
+      rules: rule,
+      receiverCountry: PLATFORM_RECEIVER_COUNTRY,
+      webhook: { url, secret: credentials.webhookSecret!, isPublicBaseUrl: isPublicBaseUrl() },
+    });
+
+    await this.persist(provider, report, {
+      webhookRef: webhook?.ref ?? null,
+      webhookRegisteredAt: webhook?.registeredAt ?? null,
+      webhookError: webhook?.error ?? null,
+    });
     return report;
   }
 
-  private async persist(provider: string, report: ValidationReport, webhook: { webhookRef?: string | null; webhookRegisteredAt?: Date | null; webhookError?: string | null }) {
-    // Create with code-default rules only when missing — never overwrite Catalog edits
-    const existing = await this.settingDAO.findByProvider(provider as PaymentProvider, 'platform');
-    if (!existing) {
-      const caps = getCapabilities(provider as ProviderKey);
-      const toArr = (l: string[] | '*') => (l === '*' ? ['*'] : l);
-      await this.settingDAO.upsert(provider as PaymentProvider, 'platform', {
-        isEnabled: true,
-        receiverCountries: toArr(caps.receiverCountries),
-        payerCountries: toArr(caps.payerCountries),
-        currencies: toArr(caps.currencies),
-      });
-    }
-    await this.settingDAO.update(provider as PaymentProvider, 'platform', {
-      webhookRef: webhook.webhookRef ?? null,
-      webhookRegisteredAt: webhook.webhookRegisteredAt ?? null,
+  private async persist(
+    provider: string,
+    report: ValidationReport,
+    webhook: { webhookRef?: string | null; webhookRegisteredAt?: Date | null; webhookError?: string | null },
+  ) {
+    await this.ruleDAO.update(provider as PaymentProvider, {
+      ...(webhook.webhookRef !== undefined ? { webhookRef: webhook.webhookRef } : {}),
+      ...(webhook.webhookRegisteredAt !== undefined ? { webhookRegisteredAt: webhook.webhookRegisteredAt } : {}),
       webhookError: webhook.webhookError ?? null,
       validationReport: report as unknown as Record<string, unknown> & object,
       validatedAt: new Date(),
@@ -117,15 +99,15 @@ export class PlatformProviderService {
 
   async getStatus(provider: string) {
     if (!isProviderKey(provider)) throw new ProviderNotImplementedError(provider);
-    const row = await this.settingDAO.findByProvider(provider, 'platform');
+    const row = await this.ruleDAO.findByProvider(provider);
     return {
-      webhookUrl: this.webhookRegistrationService.urlFor({ kind: 'platform' }, provider),
+      webhookUrl: webhookUrlFor({ kind: 'platform' }, provider, getAppBaseUrl()),
       webhookRef: row?.webhookRef ?? null,
       webhookRegisteredAt: row?.webhookRegisteredAt ?? null,
       webhookError: row?.webhookError ?? null,
       validationReport: row?.validationReport ?? null,
       validatedAt: row?.validatedAt ?? null,
-      lastEvent: await this.providerEventDAO.findLatest(provider, 'platform'),
+      lastEvent: await this.providerEventDAO.findLatest(provider),
     };
   }
 }

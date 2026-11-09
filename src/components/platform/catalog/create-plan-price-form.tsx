@@ -17,9 +17,9 @@ export function CreatePlanPriceForm({ currencies }: { currencies: string[] }) {
   const [open, setOpen] = useState(false);
   const form = useForm<PlanPriceCreate>({
     resolver: zodResolver(planPriceCreateSchema),
-    defaultValues: { planKey: '', displayName: '', interval: 'monthly', amountMinor: 0, currencyCode: 'INR' },
+    defaultValues: { planKey: '', displayName: '', interval: 'monthly', amountMinor: 0, marketKey: 'TIER_3' },
   });
-  const currencyCode = form.watch('currencyCode');
+  const marketKey = form.watch('marketKey');
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger render={<Button size="sm" />}>Add plan price</DialogTrigger>
@@ -40,7 +40,7 @@ export function CreatePlanPriceForm({ currencies }: { currencies: string[] }) {
                   <SelectContent><SelectItem value="monthly">Monthly</SelectItem><SelectItem value="yearly">Yearly</SelectItem></SelectContent>
                 </Select><FormMessage /></FormItem>
             )} />
-            <FormField control={form.control} name="currencyCode" render={({ field }) => (
+            <FormField control={form.control} name="marketKey" render={({ field }) => (
               <FormItem><FormLabel>Currency</FormLabel>
                 <Select value={field.value} onValueChange={field.onChange}>
                   <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
@@ -48,7 +48,7 @@ export function CreatePlanPriceForm({ currencies }: { currencies: string[] }) {
                 </Select><FormMessage /></FormItem>
             )} />
             <FormField control={form.control} name="amountMinor" render={({ field }) => (
-              <FormItem><FormLabel>Price ({currencyCode})</FormLabel>
+              <FormItem><FormLabel>Price ({marketKey})</FormLabel>
                 <FormControl>
                   <Input type="number" step="0.01" min="1"
                     value={Number.isNaN(field.value) ? '' : field.value / 100}

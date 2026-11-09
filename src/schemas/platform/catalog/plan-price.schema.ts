@@ -5,7 +5,7 @@ export const planPriceCreateSchema = z.object({
   displayName: z.string().min(1).max(100),
   interval: z.enum(['monthly', 'yearly']),
   amountMinor: z.number().int(),
-  currencyCode: z.string().length(3),
+  marketKey: z.string().min(1),
 });
 
 export const planPriceUpdateSchema = z.object({

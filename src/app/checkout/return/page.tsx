@@ -2,6 +2,7 @@
 
 import { Suspense } from 'react';
 import Link from 'next/link';
+import { getClientAdapter, isProviderKey } from '@/lib/common/payments/core/registry.client';
 import { useSearchParams } from 'next/navigation';
 import { usePaymentRecordStatus } from '@/hooks/common/payments/use-payment-record-status';
 import { StatusBadge } from '@/components/common/payments/status-badge';
@@ -14,6 +15,8 @@ function ReturnContent() {
   const url = searchParams.get('url');
   const back = searchParams.get('back') ?? '/platform';
   const { data } = usePaymentRecordStatus(url);
+  const provider = searchParams.get('provider');
+  const brand = provider && isProviderKey(provider) ? getClientAdapter(provider).manifest.brand.name : undefined;
 
   return (
     <Card className="mx-auto max-w-md">
@@ -32,7 +35,8 @@ function ReturnContent() {
           <StatusBadge status={data.status} />
         )}
       </CardContent>
-      <CardFooter>
+      <CardFooter className="flex-col items-start gap-2">
+        {brand && <p className="text-xs text-muted-foreground">Powered by {brand}</p>}
         <Link href={back} className={buttonVariants({ variant: 'outline' })}>Back</Link>
       </CardFooter>
     </Card>

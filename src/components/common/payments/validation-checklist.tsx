@@ -1,7 +1,7 @@
 import { Badge } from '@/components/ui/badge';
-import type { ValidationCheckResult } from '@/lib/common/payments/core/types';
+import type { ValidationCheckResult, ValidationReport } from '@/lib/common/payments/core/connection-checks';
 
-export function ValidationChecklist({ report }: { report: { checks: ValidationCheckResult[]; canSave: boolean } }) {
+export function ValidationChecklist({ report }: { report: { checks: ValidationCheckResult[]; canSave: boolean } | ValidationReport }) {
   return (
     <div className="space-y-2">
       {report.checks.map((c) => (

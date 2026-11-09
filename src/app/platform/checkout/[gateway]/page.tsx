@@ -2,7 +2,9 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { prisma } from '@/lib/common/connectors/prisma';
 import { PlatformPaymentService } from '@/lib/platform/services/payments/platform-payment-service';
-import { listProviders } from '@/lib/common/payments/core/factory';
+import { getManifest, listManifests } from '@/lib/common/payments/core/registry.server';
+import { supports } from '@/lib/common/payments/core/contracts/features';
+import { providerKeySchema } from '@/lib/common/payments/core/contracts/manifest';
 import { CountryService } from '@/lib/common/services/catalog/country-service';
 import { parseEnumParam, parsePositivePage } from '@/lib/common/helpers/url-parsers';
 import { formatMoney } from '@/lib/common/helpers/money';
@@ -15,11 +17,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { SSRPagination } from '@/components/common/navigation/pagination';
 import { StatusBadge } from '@/components/common/payments/status-badge';
 import { RefCell } from '@/components/common/payments/ref-cell';
+import { PayingProjectSelect } from '@/components/platform/payments/paying-project-select';
 import { PayerCountrySelect } from '@/components/platform/payments/payer-country-select';
 import { SubscribeButton } from '@/components/platform/payments/subscribe-button';
 import { FixedCreditsCard } from '@/components/platform/payments/fixed-credits-card';
 import { CustomCreditsForm } from '@/components/platform/payments/custom-credits-form';
-import { RefreshPurchaseButton, RefreshSubscriptionButton, CancelSubscriptionButton } from '@/components/platform/payments/row-buttons';
+import { RefreshPurchaseButton, RefreshSubscriptionButton, CancelSubscriptionButton, RefundButton } from '@/components/platform/payments/row-buttons';
 import { cn } from '@/lib/utils';
 import { LinkTabs } from '@/components/common/navigation/link-tabs';
 const PLATFORM_TABS = [
@@ -41,14 +44,21 @@ export default async function PlatformGatewayPage({
   const query = await searchParams;
 
   const countries = await new CountryService(prisma).listCountries();
-  const payer = parseEnumParam(query.payer, countries.map((c) => c.code), 'IN');
-  const payerCurrency = countries.find((c) => c.code === payer)?.currencyCode ?? 'INR';
+  const payer = parseEnumParam(query.payer, countries.map((c) => c.countryCode), 'IN');
+  const projects = await prisma.project.findMany({ orderBy: { name: 'asc' } });
+  const payingProjectId = (query.project as string) ?? projects[0]?.id;
+  const payerCurrency = countries.find((c) => c.countryCode === payer)?.currencyCode ?? 'INR';
   const ppage = parsePositivePage(query.ppage);
   const spage = parsePositivePage(query.spage);
   const paypage = parsePositivePage(query.paypage);
   const activity = parseEnumParam(query.activity, ['purchases','subscriptions','payments'] as const, 'purchases');
 
-  const providers = listProviders('platform');
+  const PROVIDER_LABELS: Record<string, string> = { dodo: 'Dodo Payments', stripe: 'Stripe', paypal: 'PayPal' };
+  const manifests = listManifests('platform');
+  const providers = providerKeySchema.options.map((key) => {
+    const manifest = manifests.find((m) => m.key === key);
+    return { key, label: manifest?.brand.name ?? PROVIDER_LABELS[key] ?? key, implemented: manifest !== undefined };
+  });
   if (gateway !== 'auto' && !providers.some((p) => p.key === gateway)) notFound();
   const caps = providers.find((p) => p.key === gateway);
 
@@ -77,7 +87,8 @@ export default async function PlatformGatewayPage({
       <LinkTabs items={PLATFORM_TABS} />
           <p className="text-muted-foreground">Sell AI credit packs and subscription plans through the platform gateway.</p>
         </div>
-        <PayerCountrySelect value={payer} options={countries} />
+        <PayerCountrySelect value={payer} options={countries.map((c) => ({ code: c.countryCode, name: c.name }))} />
+            <PayingProjectSelect value={payingProjectId} options={projects.map((p) => ({ id: p.id, name: p.name }))} />
       </div>
       <Separator />
 
@@ -128,10 +139,10 @@ export default async function PlatformGatewayPage({
               )}
               {planPrices.map((p) => (
                 <div key={p.id} className="flex items-center justify-between">
-                  <span>{p.displayName}</span>
+                  <span>{p.plan.name}</span>
                   <span className="flex items-center gap-3">
-                    <span className="text-muted-foreground">{formatMoney(p.amountMinor, p.currencyCode)}/month</span>
-                    <SubscribeButton gateway={gateway} payer={payer} planPriceId={p.id} />
+                    <span className="text-muted-foreground">{formatMoney(p.unitAmount, p.currencyCode)}/month</span>
+                    <SubscribeButton gateway={gateway} payer={payer} projectId={payingProjectId} planPriceId={p.id} />
                   </span>
                 </div>
               ))}
@@ -140,8 +151,8 @@ export default async function PlatformGatewayPage({
 
           {creditRate ? (
             <div className="grid gap-6 md:grid-cols-2">
-              <FixedCreditsCard gateway={gateway} payer={payer} rateMinor={creditRate.rateMinor} currencyCode={creditRate.currencyCode} />
-              <CustomCreditsForm gateway={gateway} payer={payer} rateMinor={creditRate.rateMinor} currencyCode={creditRate.currencyCode} />
+              <FixedCreditsCard gateway={gateway} payer={payer} projectId={payingProjectId} rateMinor={creditRate.unitAmount} currencyCode={creditRate.currencyCode} />
+              <CustomCreditsForm gateway={gateway} payer={payer} projectId={payingProjectId} rateMinor={creditRate.unitAmount} currencyCode={creditRate.currencyCode} />
             </div>
           ) : (
             <Alert>
@@ -172,8 +183,8 @@ export default async function PlatformGatewayPage({
                       {purchases.data.length === 0 && <TableRow><TableCell colSpan={7} className="text-muted-foreground">No records yet</TableCell></TableRow>}
                       {purchases.data.map((p) => (
                         <TableRow key={p.id}>
-                          <TableCell>{p.kind}</TableCell><TableCell>{p.credits}</TableCell>
-                          <TableCell>{formatMoney(p.amountMinor, p.currencyCode)}</TableCell>
+                          <TableCell>credits</TableCell><TableCell>{p.quantity}</TableCell>
+                          <TableCell>{formatMoney(p.amount, p.currencyCode)}</TableCell>
                           <TableCell><StatusBadge status={p.status} /></TableCell>
                           <TableCell><RefCell value={p.providerOrderId} /></TableCell>
                           <TableCell>{p.createdAt.toLocaleString()}</TableCell>
@@ -191,11 +202,11 @@ export default async function PlatformGatewayPage({
                       {subscriptions.data.length === 0 && <TableRow><TableCell colSpan={5} className="text-muted-foreground">No records yet</TableCell></TableRow>}
                       {subscriptions.data.map((s) => (
                         <TableRow key={s.id}>
-                          <TableCell>{s.platformPlanPrice.displayName}</TableCell>
+                          <TableCell>{s.platformPlanPrice?.plan.name ?? ''}</TableCell>
                           <TableCell><StatusBadge status={s.status} /></TableCell>
                           <TableCell>{s.currentPeriodEnd?.toLocaleDateString() ?? '—'}</TableCell>
                           <TableCell><RefCell value={s.providerSubscriptionId} /></TableCell>
-                          <TableCell className="flex gap-1"><RefreshSubscriptionButton id={s.id} /><CancelSubscriptionButton id={s.id} /></TableCell>
+                          <TableCell className="flex gap-1"><RefreshSubscriptionButton id={s.id} /><CancelSubscriptionButton id={s.id} canCancelAtPeriodEnd={supports(getManifest(s.provider), 'subscription.cancel_at_period_end')} /></TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -204,15 +215,20 @@ export default async function PlatformGatewayPage({
               </>)}
               {activity === 'payments' && (<>
                   <Table>
-                    <TableHeader><TableRow><TableHead>Kind</TableHead><TableHead>Amount</TableHead><TableHead>Payment ref</TableHead><TableHead>Created</TableHead></TableRow></TableHeader>
+                    <TableHeader><TableRow><TableHead>Kind</TableHead><TableHead>Amount</TableHead><TableHead>Payment ref</TableHead><TableHead>Created</TableHead><TableHead></TableHead></TableRow></TableHeader>
                     <TableBody>
-                      {payments.data.length === 0 && <TableRow><TableCell colSpan={4} className="text-muted-foreground">No records yet</TableCell></TableRow>}
+                      {payments.data.length === 0 && <TableRow><TableCell colSpan={5} className="text-muted-foreground">No records yet</TableCell></TableRow>}
                       {payments.data.map((p) => (
                         <TableRow key={p.id}>
                           <TableCell>{p.kind}</TableCell>
-                          <TableCell>{formatMoney(p.amountMinor, p.currencyCode)}</TableCell>
+                          <TableCell>{formatMoney(p.amount, p.currencyCode)}</TableCell>
                           <TableCell><RefCell value={p.providerPaymentId} /></TableCell>
                           <TableCell>{p.createdAt.toLocaleString()}</TableCell>
+                          <TableCell>{supports(getManifest(p.provider), 'refund.create')
+                            ? <RefundButton id={p.id} />
+                            : <Tooltip><TooltipTrigger render={<span className="text-xs text-muted-foreground cursor-help underline decoration-dotted">refund unsupported</span>} />
+                              <TooltipContent>{getManifest(p.provider).brand.name} has no refund API — refund from the {getManifest(p.provider).brand.name} dashboard</TooltipContent></Tooltip>}
+                          </TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

@@ -1,21 +1,28 @@
 import type { PrismaClient } from '@/generated/prisma';
-import { AiCreditRateDAO } from '@/lib/platform/dao/payments/ai-credit-rate-dao';
-import { CREDIT_RATES } from './data/credit-rates';
+import { PlatformOfferingDAO, PlatformOfferingPriceDAO } from '@/lib/platform/dao/payments/platform-offering-dao';
+
+// ai_credits offering: one price per market (unitAmount = price of one credit)
+const CREDIT_PRICES = [
+  { market: 'TIER_1', unitAmount: 1, currencyCode: 'USD' },
+  { market: 'TIER_2', unitAmount: 1, currencyCode: 'EUR' },
+  { market: 'TIER_3', unitAmount: 50, currencyCode: 'INR' },
+] as const;
 
 export async function seedCreditRates(prisma: PrismaClient) {
-  const creditRateDAO = new AiCreditRateDAO(prisma);
+  const offeringDAO = new PlatformOfferingDAO(prisma);
+  const priceDAO = new PlatformOfferingPriceDAO(prisma);
 
-  let created = 0;
-  for (const rate of CREDIT_RATES) {
-    // Do not overwrite Catalog edits — create only when the row is missing.
-    const existing = await creditRateDAO.list({
-      filters: { currencyCode: rate.currencyCode },
-      pagination: { page: 1, limit: 1 },
+  const offering = await offeringDAO.upsertByKey('ai_credits', {
+    name: 'AI credits', unitLabel: 'credit', minQuantity: 100, maxQuantity: 100000,
+    quantityStep: 1, quickPicks: [100, 250, 500, 1000], isActive: true,
+  });
+
+  for (const p of CREDIT_PRICES) {
+    const market = await prisma.market.findUnique({ where: { key: p.market } });
+    await priceDAO.upsert(offering.id, market!.id, 'one_time', null, {
+      unitAmount: p.unitAmount, currencyCode: p.currencyCode, isActive: true,
     });
-    if (existing.data.length > 0) continue;
-    await creditRateDAO.upsertByCurrency(rate.currencyCode, rate);
-    created++;
   }
 
-  console.log(`✅ Seeded ${created} AI credit rates (${CREDIT_RATES.length - created} already existed)`);
+  console.log(`✅ Seeded ai_credits offering with ${CREDIT_PRICES.length} market prices`);
 }

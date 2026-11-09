@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 import { prisma } from '@/lib/common/connectors/prisma';
 import { PaymentWebhookService } from '@/lib/common/services/payments/payment-webhook-service';
-import { listProviders, isProviderKey } from '@/lib/common/payments/core/factory';
+import { listManifests, isProviderKey } from '@/lib/common/payments/core/registry.server';
 import { parseOptionalString, parsePositivePage } from '@/lib/common/helpers/url-parsers';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -39,8 +39,8 @@ export default async function ByopEventsPage({
   });
 
   // scope = connection id. Filter events to connections (of the selected project if given).
-  const where: Prisma.PaymentConnectionWhereInput = projectId ? { projectId } : {};
-  const connections = await prisma.paymentConnection.findMany({ where, select: { id: true, projectId: true } });
+  const where: Prisma.ProjectPaymentConnectionWhereInput = projectId ? { projectId } : {};
+  const connections = await prisma.projectPaymentConnection.findMany({ where, select: { id: true, projectId: true } });
   const projectNameByConnection = new Map(
     connections.map((c) => [c.id, projects.find((p) => p.id === c.projectId)?.name ?? c.projectId])
   );
@@ -54,16 +54,16 @@ export default async function ByopEventsPage({
       </div>
       <EventFilters
         provider={provider ?? ''}
-        providers={listProviders().map((p) => ({ key: p.key, label: p.label }))}
+        providers={listManifests().map((m) => ({ key: m.key, label: m.brand.name }))}
         projects={projects}
         projectId={projectId}
       />
       <Suspense key={`${provider}-${projectId}-${page}`} fallback={<Skeleton className="h-64" />}>
-        <EventsTable provider={provider} scopes={connections.map((c) => c.id)} nameFor={projectNameByConnection} page={page} query={query} />
+        <EventsTable provider={provider} connectionIds={connections.map((c) => c.id)} nameFor={projectNameByConnection} page={page} query={query} />
       </Suspense>
       {eventId && (
         <Suspense fallback={null}>
-          <EventSheetLoader id={eventId} />
+          <EventSheetLoader id={eventId} audience="project" />
         </Suspense>
       )}
     </div>
@@ -72,21 +72,21 @@ export default async function ByopEventsPage({
 
 async function EventsTable({
   provider,
-  scopes,
+  connectionIds,
   nameFor,
   page,
   query,
 }: {
   provider?: 'razorpay' | 'dodo' | 'stripe' | 'paypal';
-  scopes: string[];
+  connectionIds: string[];
   nameFor: Map<string, string>;
   page: number;
   query: Record<string, string | string[] | undefined>;
 }) {
   const service = new PaymentWebhookService(prisma);
-  const events = scopes.length === 0
+  const events = connectionIds.length === 0
     ? { data: [], meta: { page: 1, totalPages: 1 } }
-    : await service.listEvents({ provider, scopes, pagination: { page, limit: 10 } });
+    : await service.listProjectEvents({ provider, connectionIds, pagination: { page, limit: 10 } });
 
   return (
     <Card>
@@ -105,7 +105,7 @@ async function EventsTable({
               <EventRow key={e.id} id={e.id}>
                 <TableCell>{e.receivedAt.toLocaleString()}</TableCell>
                 <TableCell>{e.provider}</TableCell>
-                <TableCell>{nameFor.get(e.scope) ?? e.scope.slice(0, 8)}</TableCell>
+                <TableCell>{nameFor.get(e.connectionId) ?? e.connectionId.slice(0, 8)}</TableCell>
                 <TableCell>{e.eventType}</TableCell>
                 <TableCell>{e.processedAt ? e.processedAt.toLocaleString() : '—'}</TableCell>
                 <TableCell className="max-w-48 truncate">{e.note ?? e.error ?? '—'}</TableCell>
