@@ -44,6 +44,7 @@ import {
   NoPaymentProviderAvailableError,
   PaymentNotStartedError,
   PlanPriceExistsError,
+  ActiveSubscriptionExistsError,
   PlanPriceInUseError,
   PlanPriceNotFoundError,
   PlatformSubscriptionNotFoundError,
@@ -379,7 +380,11 @@ export class PlatformPaymentService {
       persist: async (refs) => { await this.planPriceDAO.update(planPrice.id, { providerPlanRefs: refs }); },
     });
 
-    // 4. Create pending subscription
+    // 4. Create pending subscription — one non-ended base-plan subscription per project
+    const existing = await this.prisma.platformSubscription.findFirst({
+      where: { projectId: input.projectId, platformPlanPriceId: { not: null }, status: { notIn: ['canceled', 'completed'] } },
+    });
+    if (existing) throw new ActiveSubscriptionExistsError(input.projectId);
     const subscription = await this.subscriptionDAO.create({
       projectId: input.projectId,
       platformUserId: await this.labPlatformUserId(),

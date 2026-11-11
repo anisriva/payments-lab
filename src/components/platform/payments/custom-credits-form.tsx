@@ -18,7 +18,7 @@ export function CustomCreditsForm({ gateway, payer, projectId, rateMinor, curren
   const flow = useCheckoutFlow();
   const form = useForm<CreditPurchaseCreate>({
     resolver: zodResolver(creditPurchaseCreateSchema),
-    defaultValues: { gateway, payerCountry: payer, credits: MIN_CREDITS, kind: 'custom' },
+    defaultValues: { projectId, gateway, payerCountry: payer, credits: MIN_CREDITS, kind: 'custom' },
   });
   const credits = form.watch('credits');
   return (

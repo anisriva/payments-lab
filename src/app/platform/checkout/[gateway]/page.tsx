@@ -47,6 +47,12 @@ export default async function PlatformGatewayPage({
   const payer = parseEnumParam(query.payer, countries.map((c) => c.countryCode), 'IN');
   const projects = await prisma.project.findMany({ orderBy: { name: 'asc' } });
   const payingProjectId = (query.project as string) ?? projects[0]?.id;
+  const activePlanSub = payingProjectId
+    ? await prisma.platformSubscription.findFirst({
+        where: { projectId: payingProjectId, platformPlanPriceId: { not: null }, status: { notIn: ['canceled', 'completed'] } },
+        include: { platformPlanPrice: { include: { plan: true } } },
+      })
+    : null;
   const payerCurrency = countries.find((c) => c.countryCode === payer)?.currencyCode ?? 'INR';
   const ppage = parsePositivePage(query.ppage);
   const spage = parsePositivePage(query.spage);
@@ -128,6 +134,12 @@ export default async function PlatformGatewayPage({
           <Card>
             <CardHeader>
               <CardTitle>Subscription plans</CardTitle>
+              {activePlanSub && (
+                <CardDescription>
+                  This project already has an active <span className="font-medium">{activePlanSub.platformPlanPrice?.plan.name ?? 'plan'}</span> subscription —
+                  cancel it from the subscriptions table below to switch.
+                </CardDescription>
+              )}
               <CardDescription>Recurring plans provisioned on the selected gateway</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -142,14 +154,19 @@ export default async function PlatformGatewayPage({
                   <span>{p.plan.name}</span>
                   <span className="flex items-center gap-3">
                     <span className="text-muted-foreground">{formatMoney(p.unitAmount, p.currencyCode)}/month</span>
-                    <SubscribeButton gateway={gateway} payer={payer} projectId={payingProjectId} planPriceId={p.id} />
+                    {payingProjectId && <SubscribeButton gateway={gateway} payer={payer} projectId={payingProjectId} planPriceId={p.id}
+                            hasActivePlan={!!activePlanSub}
+                            activePlanName={activePlanSub?.platformPlanPrice?.plan.name} />}
                   </span>
                 </div>
               ))}
             </CardContent>
           </Card>
 
-          {creditRate ? (
+          {!payingProjectId && (
+            <Alert><AlertTitle>No project selected</AlertTitle><AlertDescription>Create a project under BYOP first — platform payments are attached to a project.</AlertDescription></Alert>
+          )}
+          {payingProjectId && creditRate ? (
             <div className="grid gap-6 md:grid-cols-2">
               <FixedCreditsCard gateway={gateway} payer={payer} projectId={payingProjectId} rateMinor={creditRate.unitAmount} currencyCode={creditRate.currencyCode} />
               <CustomCreditsForm gateway={gateway} payer={payer} projectId={payingProjectId} rateMinor={creditRate.unitAmount} currencyCode={creditRate.currencyCode} />

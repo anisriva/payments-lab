@@ -31,6 +31,7 @@ const ERROR_STATUS_BY_NAME: Record<string, number> = {
   ProviderSettingInvalidError: 400,
   NoCreditRateForCurrencyError: 400,
   InvalidPlanPriceError: 400,
+  ActiveSubscriptionExistsError: 409,
   CurrencyNotSupportedError: 400,
   PaymentCapabilityNotSupportedError: 400,
   InvalidCredentialsInputError: 400,
