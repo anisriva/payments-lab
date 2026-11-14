@@ -1,7 +1,7 @@
 import { paginate, PrismaTransaction } from '@/lib/common/dao';
 import { PaginationResult } from '@/types/common/pagination';
 import { DatabaseException } from '@/lib/common/exceptions';
-import type { PrismaClient, ProjectSubscription, Prisma } from '@/generated/prisma';
+import type { PrismaClient, ProjectSubscription, SubscriptionStatus, Prisma } from '@/generated/prisma';
 import type { ProjectSubscriptionCreateInput, ProjectSubscriptionUpdateInput, ProjectSubscriptionListOptions } from './types';
 
 const projectSubscriptionListInclude = {
@@ -46,6 +46,18 @@ export class ProjectSubscriptionDAO {
         where: { id },
         data,
       });
+    } catch (error) {
+      throw new DatabaseException(error, 'project subscription');
+    }
+  }
+
+  async updateIfStatus(id: string, from: SubscriptionStatus[], data: ProjectSubscriptionUpdateInput): Promise<boolean> {
+    try {
+      const { count } = await this.prisma.projectSubscription.updateMany({
+        where: { id, status: { in: from } },
+        data,
+      });
+      return count === 1;
     } catch (error) {
       throw new DatabaseException(error, 'project subscription');
     }

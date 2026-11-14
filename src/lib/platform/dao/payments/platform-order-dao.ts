@@ -1,7 +1,7 @@
 import { paginate, PrismaTransaction } from '@/lib/common/dao';
 import { PaginationResult } from '@/types/common/pagination';
 import { DatabaseException } from '@/lib/common/exceptions';
-import type { PrismaClient, PlatformOrder, Prisma } from '@/generated/prisma';
+import type { PrismaClient, PlatformOrder, PaymentStatus, Prisma } from '@/generated/prisma';
 import type { PlatformOrderCreateInput, PlatformOrderUpdateInput, PlatformOrderListOptions } from './types';
 
 export class PlatformOrderDAO {
@@ -26,6 +26,18 @@ export class PlatformOrderDAO {
   async update(id: string, data: PlatformOrderUpdateInput): Promise<PlatformOrder> {
     try {
       return await this.prisma.platformOrder.update({ where: { id }, data });
+    } catch (error) {
+      throw new DatabaseException(error, 'platform order');
+    }
+  }
+
+  async updateIfStatus(id: string, from: PaymentStatus[], data: PlatformOrderUpdateInput): Promise<boolean> {
+    try {
+      const { count } = await this.prisma.platformOrder.updateMany({
+        where: { id, status: { in: from } },
+        data,
+      });
+      return count === 1;
     } catch (error) {
       throw new DatabaseException(error, 'platform order');
     }

@@ -99,6 +99,8 @@ export interface PaymentProvider {
   // Required
   verifyCredentials(): Promise<CredentialCheck>;
   parseWebhook(rawBody: string, headers: Record<string, string>): NormalizedEvent;
+  // No signature check. Only for events already verified at ingest.
+  normalizeWebhook(rawBody: string, headers: Record<string, string>): NormalizedEvent;
 
   // One-time payments
   createOneTimeCheckout?(input: OneTimeCheckoutInput): Promise<CheckoutStart>;

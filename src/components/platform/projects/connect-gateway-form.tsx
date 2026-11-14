@@ -77,8 +77,8 @@ export function ConnectGatewayForm({
         </form>
       </Form>
 
-      {manual.map((m) => (
-        <Alert key={m.title}>
+      {manual.map((m, i) => (
+        <Alert key={`${m.title}-${i}`}>
           <AlertTitle>Manual step — {m.title}</AlertTitle>
           <AlertDescription>
             <ol className="list-decimal pl-5 text-sm space-y-1">

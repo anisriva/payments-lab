@@ -11,3 +11,19 @@ export function canMoveSubscription(from: SubscriptionStatus, to: SubscriptionSt
   if (from === 'canceled' || from === 'completed') return false;
   return true;
 }
+
+export const PAYMENT_STATUSES: PaymentStatus[] = ['pending', 'paid', 'failed', 'refunded'];
+export const SUBSCRIPTION_STATUSES: SubscriptionStatus[] = [
+  'incomplete', 'trialing', 'active', 'past_due', 'canceled', 'completed',
+];
+export const LIVE_SUBSCRIPTION_STATUSES: SubscriptionStatus[] = [
+  'incomplete', 'trialing', 'active', 'past_due',
+];
+
+export function paymentFromStates(to: PaymentStatus): PaymentStatus[] {
+  return PAYMENT_STATUSES.filter((s) => canMovePayment(s, to));
+}
+
+export function subscriptionFromStates(to: SubscriptionStatus): SubscriptionStatus[] {
+  return SUBSCRIPTION_STATUSES.filter((s) => canMoveSubscription(s, to));
+}
