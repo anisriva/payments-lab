@@ -48,6 +48,7 @@ export class PlatformOrderDAO {
 
     const where: Prisma.PlatformOrderWhereInput = {
       ...(filters.provider && { provider: filters.provider }),
+      ...(filters.projectId && { projectId: filters.projectId }),
     };
 
     const orderBy: Prisma.PlatformOrderOrderByWithRelationInput = sort

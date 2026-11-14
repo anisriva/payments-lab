@@ -31,6 +31,7 @@ export class PlatformPaymentDAO {
 
     const where: Prisma.PlatformPaymentWhereInput = {
       ...(filters.provider && { provider: filters.provider }),
+      ...(filters.projectId && { projectId: filters.projectId }),
     };
 
     const orderBy: Prisma.PlatformPaymentOrderByWithRelationInput = sort

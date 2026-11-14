@@ -238,16 +238,16 @@ export class PlatformPaymentService {
     };
   }
 
-  async listCreditPurchases(options: { provider?: ProviderKey; pagination?: { page: number; limit: number } }) {
-    return this.orderDAO.list({ pagination: options.pagination, filters: { provider: options.provider } });
+  async listCreditPurchases(options: { provider?: ProviderKey; projectId?: string; pagination?: { page: number; limit: number } }) {
+    return this.orderDAO.list({ pagination: options.pagination, filters: { provider: options.provider, projectId: options.projectId } });
   }
 
-  async listSubscriptions(options: { provider?: ProviderKey; pagination?: { page: number; limit: number } }) {
-    return this.subscriptionDAO.list({ pagination: options.pagination, filters: { provider: options.provider } });
+  async listSubscriptions(options: { provider?: ProviderKey; projectId?: string; pagination?: { page: number; limit: number } }) {
+    return this.subscriptionDAO.list({ pagination: options.pagination, filters: { provider: options.provider, projectId: options.projectId } });
   }
 
-  async listPayments(options: { provider?: ProviderKey; pagination?: { page: number; limit: number } }) {
-    return this.paymentDAO.list({ pagination: options.pagination, filters: { provider: options.provider } });
+  async listPayments(options: { provider?: ProviderKey; projectId?: string; pagination?: { page: number; limit: number } }) {
+    return this.paymentDAO.list({ pagination: options.pagination, filters: { provider: options.provider, projectId: options.projectId } });
   }
 
   private async resolveProvider(

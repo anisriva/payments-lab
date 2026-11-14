@@ -76,6 +76,7 @@ export class PlatformSubscriptionDAO {
 
     const where: Prisma.PlatformSubscriptionWhereInput = {
       ...(filters.provider && { provider: filters.provider }),
+      ...(filters.projectId && { projectId: filters.projectId }),
     };
 
     const orderBy: Prisma.PlatformSubscriptionOrderByWithRelationInput = sort

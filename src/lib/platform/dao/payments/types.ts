@@ -56,7 +56,7 @@ export interface PlatformSubscriptionUpdateInput {
 export interface PlatformSubscriptionListOptions {
   pagination?: PaginationInput;
   sort?: SortOptions;
-  filters?: { provider?: PaymentProvider };
+  filters?: { provider?: PaymentProvider; projectId?: string };
 }
 
 export interface PlatformOrderCreateInput {
@@ -88,7 +88,7 @@ export interface PlatformOrderUpdateInput {
 export interface PlatformOrderListOptions {
   pagination?: PaginationInput;
   sort?: SortOptions;
-  filters?: { provider?: PaymentProvider };
+  filters?: { provider?: PaymentProvider; projectId?: string };
 }
 
 export interface PlatformPaymentCreateInput {
@@ -106,7 +106,7 @@ export interface PlatformPaymentCreateInput {
 export interface PlatformPaymentListOptions {
   pagination?: PaginationInput;
   sort?: SortOptions;
-  filters?: { provider?: PaymentProvider };
+  filters?: { provider?: PaymentProvider; projectId?: string };
 }
 
 export interface PlatformOfferingCreateInput {
