@@ -68,6 +68,21 @@ export class PlanPriceExistsError extends Error {
   }
 }
 
+export class ActiveSubscriptionExistsError extends Error {
+  constructor(projectId: string) {
+    super(`Project ${projectId} already has an active base-plan subscription — cancel it first`);
+    this.name = 'ActiveSubscriptionExistsError';
+  }
+}
+
+export class PlatformSubscriptionExistsError extends Error {
+  constructor(projectId: string) {
+    super('This project already has a live plan subscription.');
+    this.name = 'PlatformSubscriptionExistsError';
+    void projectId;
+  }
+}
+
 export class PlanPriceInUseError extends Error {
   constructor(id: string) {
     super(`Plan price is in use and cannot be deleted: ${id}`);

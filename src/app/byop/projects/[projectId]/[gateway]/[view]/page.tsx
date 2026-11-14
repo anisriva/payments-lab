@@ -26,7 +26,6 @@ import { ProjectCard } from '@/components/platform/projects/project-card';
 import { OfferingActiveSwitch, OfferingActions } from '@/components/platform/projects/offering-actions';
 import { ConnectGatewayForm } from '@/components/platform/projects/connect-gateway-form';
 import { isProviderKey } from '@/lib/common/payments/core/registry.server';
-import { getClientAdapter } from '@/lib/common/payments/core/registry.client';
 import { CreateOfferingForm } from '@/components/platform/projects/create-offering-form';
 import { RevalidateButton, DisconnectDialogButton } from '@/components/platform/projects/connection-actions';
 import { ValidationChecklist } from '@/components/common/payments/validation-checklist';
@@ -180,7 +179,7 @@ export default async function ByopGatewayPage({
                   )}
                 </div>
               ) : isProviderKey(gateway) ? (
-                <ConnectGatewayForm projectId={projectId} provider={gateway} adapter={getClientAdapter(gateway)} webhookUrl={webhookUrl} />
+                <ConnectGatewayForm projectId={projectId} provider={gateway} webhookUrl={webhookUrl} />
               ) : (
                 <Alert><AlertTitle>Not implemented yet</AlertTitle></Alert>
               )}

@@ -12,7 +12,12 @@ import { ProjectPaymentConnectionService } from './project-payment-connection-se
 import { ensurePlanRef, readPlanRef } from '@/lib/common/services/payments/provider-plan-service';
 import { ProviderRulesService } from '@/lib/common/services/payments/provider-rules-service';
 import { CountryService } from '@/lib/common/services/catalog/country-service';
-import { canMovePayment, canMoveSubscription } from '@/lib/common/services/payments/payment-transitions';
+import {
+  canMovePayment,
+  paymentFromStates,
+  subscriptionFromStates,
+  LIVE_SUBSCRIPTION_STATUSES,
+} from '@/lib/common/services/payments/payment-transitions';
 import { SUBSCRIPTION_TOTAL_CYCLES } from '@/lib/common/services/payments/payment-constants';
 import { getPaymentEnvironment } from '@/config/payments/env';
 import { currencyAllowed } from '@/lib/common/payments/core/coverage';
@@ -327,15 +332,19 @@ export class ProjectPaymentService {
     const { adapter } = await this.connectionService.getAdapter(sub.connectionId, { requireEnabled: false });
     if (!supports(adapter.manifest, 'subscription.read')) return sub;
     const result = await adapter.getSubscriptionStatus!(sub.providerSubscriptionId);
-    if (canMoveSubscription(sub.status, result.status)) {
-      return this.subscriptionDAO.update(id, {
-        status: result.status,
+    const moved = await this.subscriptionDAO.updateIfStatus(id, subscriptionFromStates(result.status), {
+      status: result.status,
+      currentPeriodStart: result.currentPeriodStart ?? undefined,
+      currentPeriodEnd: result.currentPeriodEnd ?? undefined,
+      canceledAt: result.status === 'canceled' ? new Date() : undefined,
+    });
+    if (!moved && (result.currentPeriodStart || result.currentPeriodEnd)) {
+      await this.subscriptionDAO.update(id, {
         currentPeriodStart: result.currentPeriodStart ?? undefined,
         currentPeriodEnd: result.currentPeriodEnd ?? undefined,
-        canceledAt: result.status === 'canceled' ? new Date() : undefined,
       });
     }
-    return sub;
+    return (await this.subscriptionDAO.findById(id)) ?? sub;
   }
 
   async syncSubscription(projectId: string, id: string): Promise<ProjectSubscription> {
@@ -401,18 +410,57 @@ export class ProjectPaymentService {
             ? await this.subscriptionDAO.findByConnectionAndProviderSubscriptionId(connectionId, event.subscriptionRef)
             : null;
         if (!sub || sub.connectionId !== connectionId) return 'no matching subscription';
+
+        if (event.type === 'subscription.charged') {
+          return this.prisma.$transaction(async (tx) => {
+            const txSubscriptionDAO = new ProjectSubscriptionDAO(tx);
+            const txPaymentDAO = new ProjectPaymentDAO(tx);
+            const moved = await txSubscriptionDAO.updateIfStatus(sub.id, LIVE_SUBSCRIPTION_STATUSES, {
+              status: 'active',
+              currentPeriodStart: event.subscriptionPeriod?.start,
+              currentPeriodEnd: event.subscriptionPeriod?.end,
+            });
+            let note = `subscription ${sub.id} charged`;
+            if (event.paymentId && event.amount && !(await txPaymentDAO.findByProviderPaymentId(event.paymentId))) {
+              const hasPayments = await txPaymentDAO.existsForSubscription(sub.id);
+              await txPaymentDAO.create({
+                projectId: sub.projectId,
+                kind: hasPayments ? 'subscription_renewal' : 'subscription_initial',
+                provider: sub.provider,
+                providerPaymentId: event.paymentId,
+                amount: event.amount.amountMinor,
+                currencyCode: event.amount.currency,
+                projectSubscriptionId: sub.id,
+              });
+              note += ' (payment recorded)';
+            } else {
+              note += ' (payment already recorded)';
+            }
+            if (!moved) {
+              const current = await txSubscriptionDAO.findById(sub.id);
+              note += `; status unchanged (${current?.status})`;
+            }
+            return note;
+          });
+        }
+
         const map: Record<string, ProjectSubscription['status']> = {
-          'subscription.activated': 'active', 'subscription.charged': 'active',
-          'subscription.cancelled': 'canceled', 'subscription.halted': 'past_due', 'subscription.completed': 'completed',
+          'subscription.activated': 'active',
+          'subscription.cancelled': 'canceled',
+          'subscription.halted': 'past_due',
+          'subscription.completed': 'completed',
         };
         const to = map[event.type];
-        if (!canMoveSubscription(sub.status, to)) return `subscription ${sub.id} already ${sub.status}`;
-        await this.subscriptionDAO.update(sub.id, {
+        const moved = await this.subscriptionDAO.updateIfStatus(sub.id, subscriptionFromStates(to), {
           status: to,
           currentPeriodStart: event.subscriptionPeriod?.start,
           currentPeriodEnd: event.subscriptionPeriod?.end,
           canceledAt: to === 'canceled' ? new Date() : undefined,
         });
+        if (!moved) {
+          const current = await this.subscriptionDAO.findById(sub.id);
+          return `subscription ${sub.id} already ${current?.status}`;
+        }
         return `subscription ${sub.id} → ${to}`;
       }
       default:
@@ -426,7 +474,10 @@ export class ProjectPaymentService {
       return this.prisma.$transaction(async (tx) => {
         const txOrderDAO = new ProjectOrderDAO(tx);
         const txPaymentDAO = new ProjectPaymentDAO(tx);
-        const updated = await txOrderDAO.update(order.id, { status: 'paid', paidAt: new Date(), fulfilledAt: new Date(), providerPaymentId: paymentId ?? undefined });
+        const claimed = await txOrderDAO.updateIfStatus(order.id, paymentFromStates('paid'), {
+          status: 'paid', paidAt: new Date(), fulfilledAt: new Date(), providerPaymentId: paymentId ?? undefined,
+        });
+        if (!claimed) return (await txOrderDAO.findById(order.id)) ?? order;
         if (paymentId && !(await txPaymentDAO.findByProviderPaymentId(paymentId))) {
           await txPaymentDAO.create({
             projectId: order.projectId, kind: 'order', provider: order.provider,
@@ -434,9 +485,10 @@ export class ProjectPaymentService {
             projectOrderId: order.id,
           });
         }
-        return updated;
+        return (await txOrderDAO.findById(order.id)) ?? order;
       });
     }
-    return this.orderDAO.update(order.id, { status: to });
+    await this.orderDAO.updateIfStatus(order.id, paymentFromStates(to), { status: to });
+    return (await this.orderDAO.findById(order.id)) ?? order;
   }
 }

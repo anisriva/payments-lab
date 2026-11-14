@@ -155,7 +155,7 @@ export async function ProvidersSection({ flow = 'platform' }: { flow?: 'platform
         const manualSteps = s.manifest
           ? (Object.entries(s.manifest.features) as [string, { supported: boolean; manual?: { title: string; steps: string[] } }][])
               .filter(([, f]) => !f.supported && f.manual)
-              .map(([, f]) => f.manual!)
+              .map(([name, f]) => ({ name, ...f.manual! }))
           : [];
         const defaultLists = s.manifest ? coveredValues(s.manifest) : { receivers: '*' as const, payers: '*' as const, currencies: '*' as const };
         return (
@@ -189,10 +189,10 @@ export async function ProvidersSection({ flow = 'platform' }: { flow?: 'platform
                   <ul className="text-sm text-muted-foreground space-y-1">
                     {manualSteps.length === 0 && <li>—</li>}
                     {manualSteps.map((m) => (
-                      <li key={m.title}>· {m.title} — {m.steps[0]}</li>
+                      <li key={m.name}>· {m.title} — {m.steps[0]}</li>
                     ))}
                     {s.manifest.coverage.filter((l) => l.note).map((l) => (
-                      <li key={l.note}>· {l.note}</li>
+                      <li key={`note-${l.note}`}>· {l.note}</li>
                     ))}
                   </ul>
                 </div>

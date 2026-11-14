@@ -41,6 +41,10 @@ export abstract class BasePaymentProvider implements PaymentProvider {
     if (!this.verifyWebhookSignature(rawBody, headers)) {
       throw new InvalidPaymentSignatureError(this.manifest.key);
     }
+    return this.normalizeWebhook(rawBody, headers);
+  }
+
+  normalizeWebhook(rawBody: string, headers: Record<string, string>): NormalizedEvent {
     const payload: unknown = JSON.parse(rawBody);
     return this.toNormalizedEvent(payload, headers);
   }

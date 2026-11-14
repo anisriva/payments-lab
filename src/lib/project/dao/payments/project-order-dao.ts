@@ -1,7 +1,7 @@
 import { paginate, PrismaTransaction } from '@/lib/common/dao';
 import { PaginationResult } from '@/types/common/pagination';
 import { DatabaseException } from '@/lib/common/exceptions';
-import type { PrismaClient, ProjectOrder, Prisma } from '@/generated/prisma';
+import type { PrismaClient, ProjectOrder, PaymentStatus, Prisma } from '@/generated/prisma';
 import type { ProjectOrderCreateInput, ProjectOrderUpdateInput, ProjectOrderListOptions } from './types';
 
 const projectOrderListInclude = {
@@ -46,6 +46,18 @@ export class ProjectOrderDAO {
         where: { id },
         data,
       });
+    } catch (error) {
+      throw new DatabaseException(error, 'project order');
+    }
+  }
+
+  async updateIfStatus(id: string, from: PaymentStatus[], data: ProjectOrderUpdateInput): Promise<boolean> {
+    try {
+      const { count } = await this.prisma.projectOrder.updateMany({
+        where: { id, status: { in: from } },
+        data,
+      });
+      return count === 1;
     } catch (error) {
       throw new DatabaseException(error, 'project order');
     }

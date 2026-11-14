@@ -19,7 +19,13 @@ import {
 } from '@/lib/common/services/payments/payment-config';
 import { getPaymentEnvironment } from '@/config/payments/env';
 import { getPlatformCredentials } from '@/config/payments/platform-credentials';
-import { canMovePayment, canMoveSubscription } from '@/lib/common/services/payments/payment-transitions';
+import {
+  canMovePayment,
+  paymentFromStates,
+  subscriptionFromStates,
+  LIVE_SUBSCRIPTION_STATUSES,
+} from '@/lib/common/services/payments/payment-transitions';
+import { log } from '@/lib/common/utils';
 import { currencyAllowed } from '@/lib/common/payments/core/coverage';
 import { supports } from '@/lib/common/payments/core/contracts/features';
 import { isProviderKey } from '@/lib/common/payments/core/registry.server';
@@ -44,6 +50,8 @@ import {
   NoPaymentProviderAvailableError,
   PaymentNotStartedError,
   PlanPriceExistsError,
+  ActiveSubscriptionExistsError,
+  PlatformSubscriptionExistsError,
   PlanPriceInUseError,
   PlanPriceNotFoundError,
   PlatformSubscriptionNotFoundError,
@@ -379,16 +387,48 @@ export class PlatformPaymentService {
       persist: async (refs) => { await this.planPriceDAO.update(planPrice.id, { providerPlanRefs: refs }); },
     });
 
-    // 4. Create pending subscription
-    const subscription = await this.subscriptionDAO.create({
-      projectId: input.projectId,
-      platformUserId: await this.labPlatformUserId(),
-      platformPlanPriceId: planPrice.id,
-      quantity: 1,
-      provider,
-      environment: getPaymentEnvironment(),
-      status: 'incomplete',
+    // 4. Create pending subscription — one non-ended base-plan subscription per project
+    for (const stale of await this.subscriptionDAO.listIncompleteBasePlans(input.projectId)) {
+      if (stale.providerSubscriptionId) {
+        const staleAdapter = getPlatformProvider(stale.provider);
+        if (supports(staleAdapter.manifest, 'subscription.cancel')) {
+          try {
+            await staleAdapter.cancelSubscription!(stale.providerSubscriptionId, { atPeriodEnd: false });
+          } catch (e) {
+            log(`startSubscription: could not cancel superseded subscription ${stale.id}`, e, 'warn');
+          }
+        }
+      }
+      // Known edge: if the superseded checkout is paid later in another tab, its status
+      // events are ignored (terminal), but Fix 1 still records the payment in the ledger,
+      // so it's visible for a manual refund.
+      await this.subscriptionDAO.updateIfStatus(stale.id, ['incomplete'], {
+        status: 'canceled',
+        canceledAt: new Date(),
+        failureReason: 'Superseded by a new checkout',
+      });
+    }
+    const existing = await this.prisma.platformSubscription.findFirst({
+      where: { projectId: input.projectId, platformPlanPriceId: { not: null }, status: { notIn: ['canceled', 'completed'] } },
     });
+    if (existing) throw new ActiveSubscriptionExistsError(input.projectId);
+    let subscription: PlatformSubscription;
+    try {
+      subscription = await this.subscriptionDAO.create({
+        projectId: input.projectId,
+        platformUserId: await this.labPlatformUserId(),
+        platformPlanPriceId: planPrice.id,
+        quantity: 1,
+        provider,
+        environment: getPaymentEnvironment(),
+        status: 'incomplete',
+      });
+    } catch (e) {
+      if (e instanceof UniqueConstraintException) {
+        throw new PlatformSubscriptionExistsError(input.projectId);
+      }
+      throw e;
+    }
 
     // 5. Create provider subscription
     let checkout;
@@ -460,21 +500,19 @@ export class PlatformPaymentService {
     if (!supports(adapter.manifest, 'subscription.read')) return subscription;
     const result = await adapter.getSubscriptionStatus!(subscription.providerSubscriptionId);
 
-    if (canMoveSubscription(subscription.status, result.status)) {
-      return this.subscriptionDAO.update(id, {
-        status: result.status,
+    const moved = await this.subscriptionDAO.updateIfStatus(id, subscriptionFromStates(result.status), {
+      status: result.status,
+      currentPeriodStart: result.currentPeriodStart ?? undefined,
+      currentPeriodEnd: result.currentPeriodEnd ?? undefined,
+      canceledAt: result.status === 'canceled' ? new Date() : undefined,
+    });
+    if (!moved && (result.currentPeriodStart || result.currentPeriodEnd)) {
+      await this.subscriptionDAO.update(id, {
         currentPeriodStart: result.currentPeriodStart ?? undefined,
         currentPeriodEnd: result.currentPeriodEnd ?? undefined,
-        canceledAt: result.status === 'canceled' ? new Date() : undefined,
       });
     }
-    if (result.currentPeriodStart || result.currentPeriodEnd) {
-      return this.subscriptionDAO.update(id, {
-        currentPeriodStart: result.currentPeriodStart ?? undefined,
-        currentPeriodEnd: result.currentPeriodEnd ?? undefined,
-      });
-    }
-    return subscription;
+    return (await this.subscriptionDAO.findById(id)) ?? subscription;
   }
 
   async syncSubscription(id: string): Promise<PlatformSubscription> {
@@ -558,53 +596,57 @@ export class PlatformPaymentService {
             : null;
         if (!subscription) return 'no matching subscription';
 
+        if (event.type === 'subscription.charged') {
+          return this.prisma.$transaction(async (tx) => {
+            const txSubscriptionDAO = new PlatformSubscriptionDAO(tx);
+            const txPaymentDAO = new PlatformPaymentDAO(tx);
+            const moved = await txSubscriptionDAO.updateIfStatus(subscription.id, LIVE_SUBSCRIPTION_STATUSES, {
+              status: 'active',
+              currentPeriodStart: event.subscriptionPeriod?.start,
+              currentPeriodEnd: event.subscriptionPeriod?.end,
+            });
+            let note = `subscription ${subscription.id} charged`;
+            if (event.paymentId && event.amount && !(await txPaymentDAO.findByProviderPaymentId(event.paymentId))) {
+              const hasPayments = await txPaymentDAO.existsForSubscription(subscription.id);
+              await txPaymentDAO.create({
+                kind: hasPayments ? 'subscription_renewal' : 'subscription_initial',
+                provider: subscription.provider,
+                environment: subscription.environment,
+                providerPaymentId: event.paymentId,
+                amount: event.amount.amountMinor,
+                currencyCode: event.amount.currency,
+                projectId: subscription.projectId,
+                platformSubscriptionId: subscription.id,
+              });
+              note += ' (payment recorded)';
+            } else {
+              note += ' (payment already recorded)';
+            }
+            if (!moved) {
+              const current = await txSubscriptionDAO.findById(subscription.id);
+              note += `; status unchanged (${current?.status})`;
+            }
+            return note;
+          });
+        }
+
         const statusMap: Record<string, PlatformSubscription['status']> = {
           'subscription.activated': 'active',
-          'subscription.charged': 'active',
           'subscription.cancelled': 'canceled',
           'subscription.halted': 'past_due',
           'subscription.completed': 'completed',
         };
         const newStatus = statusMap[event.type];
-        if (!canMoveSubscription(subscription.status, newStatus)) {
-          return `subscription ${subscription.id} already ${subscription.status}`;
-        }
-
-        if (event.type === 'subscription.charged') {
-          return this.prisma.$transaction(async (tx) => {
-            const txSubscriptionDAO = new PlatformSubscriptionDAO(tx);
-            const txPaymentDAO = new PlatformPaymentDAO(tx);
-            await txSubscriptionDAO.update(subscription.id, {
-              status: 'active',
-              currentPeriodStart: event.subscriptionPeriod?.start,
-              currentPeriodEnd: event.subscriptionPeriod?.end,
-            });
-            const hasPayments = await txPaymentDAO.existsForSubscription(subscription.id);
-            if (event.paymentId) {
-              const existing = await txPaymentDAO.findByProviderPaymentId(event.paymentId);
-              if (!existing && event.amount) {
-                await txPaymentDAO.create({
-                  kind: hasPayments ? 'subscription_renewal' : 'subscription_initial',
-                  provider: subscription.provider,
-                  environment: subscription.environment,
-                  providerPaymentId: event.paymentId,
-                  amount: event.amount.amountMinor,
-                  currencyCode: event.amount.currency,
-                  projectId: subscription.projectId,
-                  platformSubscriptionId: subscription.id,
-                });
-              }
-            }
-            return `subscription ${subscription.id} → active (charged)`;
-          });
-        }
-
-        await this.subscriptionDAO.update(subscription.id, {
+        const moved = await this.subscriptionDAO.updateIfStatus(subscription.id, subscriptionFromStates(newStatus), {
           status: newStatus,
           currentPeriodStart: event.subscriptionPeriod?.start,
           currentPeriodEnd: event.subscriptionPeriod?.end,
           canceledAt: newStatus === 'canceled' ? new Date() : undefined,
         });
+        if (!moved) {
+          const current = await this.subscriptionDAO.findById(subscription.id);
+          return `subscription ${subscription.id} already ${current?.status}`;
+        }
         return `subscription ${subscription.id} → ${newStatus}`;
       }
       case 'ignored':
@@ -624,20 +666,22 @@ export class PlatformPaymentService {
 
     // 2. Non-paid transitions are single-table
     if (to !== 'paid') {
-      return this.orderDAO.update(order.id, { status: to });
+      await this.orderDAO.updateIfStatus(order.id, paymentFromStates(to), { status: to });
+      return (await this.orderDAO.findById(order.id)) ?? order;
     }
 
-    // 3. Paid → transaction: update order + record payment + fulfil
+    // 3. Paid → transaction: claim the transition, then record payment + fulfil
     return this.prisma.$transaction(async (tx) => {
       const txOrderDAO = new PlatformOrderDAO(tx);
       const txPaymentDAO = new PlatformPaymentDAO(tx);
 
-      const updated = await txOrderDAO.update(order.id, {
+      const claimed = await txOrderDAO.updateIfStatus(order.id, paymentFromStates('paid'), {
         status: 'paid',
         paidAt: new Date(),
         fulfilledAt: new Date(),
         providerPaymentId: paymentId ?? undefined,
       });
+      if (!claimed) return (await txOrderDAO.findById(order.id)) ?? order;
 
       if (paymentId) {
         const existing = await txPaymentDAO.findByProviderPaymentId(paymentId);
@@ -655,7 +699,7 @@ export class PlatformPaymentService {
         }
       }
 
-      return updated;
+      return (await txOrderDAO.findById(order.id)) ?? order;
     });
   }
 }

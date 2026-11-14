@@ -33,7 +33,8 @@ export function useCheckoutFlow() {
       return;
     }
     const launcher = getClientAdapter(started.provider).client;
-    await launcher.launch(started.instruction, {
+    try {
+      await launcher.launch(started.instruction, {
       onSuccess: async (payload) => {
         const parsed = launcher.confirmationSchema.safeParse(payload);
         if (!parsed.success) return;
@@ -54,7 +55,10 @@ export function useCheckoutFlow() {
       },
       onDismiss: () => toast('Checkout closed — the payment stays pending'),
       onFailure: (message) => toast.error(message),
-    });
+      });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not open checkout');
+    }
   }
 
   return { run };

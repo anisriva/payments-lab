@@ -171,7 +171,7 @@ export class PaymentWebhookService {
     const row = await this.platformEventDAO.findById(eventId);
     if (!row) throw new ProviderEventNotFoundError(eventId);
     const adapter = getPlatformProvider(row.provider);
-    const event = adapter.parseWebhook(row.rawBody, row.headers as Record<string, string>);
+    const event = adapter.normalizeWebhook(row.rawBody, row.headers as Record<string, string>);
     try {
       const note = await this.platformPaymentService.applyEvent(event);
       await this.platformEventDAO.markProcessed(row.id, note);
@@ -185,7 +185,7 @@ export class PaymentWebhookService {
     const row = await this.projectEventDAO.findById(eventId);
     if (!row) throw new ProviderEventNotFoundError(eventId);
     const { adapter } = await this.connectionService.getAdapter(row.connectionId, { requireEnabled: false });
-    const event = adapter.parseWebhook(row.rawBody, row.headers as Record<string, string>);
+    const event = adapter.normalizeWebhook(row.rawBody, row.headers as Record<string, string>);
     try {
       const note = await this.projectPaymentService.applyEvent(event, row.connectionId);
       await this.projectEventDAO.markProcessed(row.id, note);

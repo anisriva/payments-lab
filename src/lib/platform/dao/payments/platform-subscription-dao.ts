@@ -1,7 +1,7 @@
 import { paginate, PrismaTransaction } from '@/lib/common/dao';
 import { PaginationResult } from '@/types/common/pagination';
 import { DatabaseException } from '@/lib/common/exceptions';
-import type { PrismaClient, PlatformSubscription, Prisma } from '@/generated/prisma';
+import type { PrismaClient, PlatformSubscription, SubscriptionStatus, Prisma } from '@/generated/prisma';
 import type { PlatformSubscriptionCreateInput, PlatformSubscriptionUpdateInput, PlatformSubscriptionListOptions } from './types';
 
 const subscriptionListInclude = {
@@ -44,6 +44,24 @@ export class PlatformSubscriptionDAO {
     } catch (error) {
       throw new DatabaseException(error, 'platform subscription');
     }
+  }
+
+  async updateIfStatus(id: string, from: SubscriptionStatus[], data: PlatformSubscriptionUpdateInput): Promise<boolean> {
+    try {
+      const { count } = await this.prisma.platformSubscription.updateMany({
+        where: { id, status: { in: from } },
+        data,
+      });
+      return count === 1;
+    } catch (error) {
+      throw new DatabaseException(error, 'platform subscription');
+    }
+  }
+
+  async listIncompleteBasePlans(projectId: string): Promise<PlatformSubscription[]> {
+    return this.prisma.platformSubscription.findMany({
+      where: { projectId, status: 'incomplete', platformPlanPriceId: { not: null } },
+    });
   }
 
   async existsForPlanPrice(planPriceId: string): Promise<boolean> {

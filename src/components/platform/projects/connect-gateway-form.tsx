@@ -12,22 +12,20 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { CopyButton } from '@/components/project/payments/copy-button';
-import { supports } from '@/lib/common/payments/core/contracts/features';
-import type { ClientAdapter } from '@/lib/common/payments/core/registry.client';
+import { getClientAdapter } from '@/lib/common/payments/core/registry.client';
 import type { ValidationReport } from '@/lib/common/payments/core/connection-checks';
 import type { z } from 'zod';
 
 export function ConnectGatewayForm({
   projectId,
   provider,
-  adapter,
   webhookUrl,
 }: {
   projectId: string;
   provider: string;
-  adapter: ClientAdapter;
   webhookUrl: string;
 }) {
+  const adapter = getClientAdapter(provider as never);
   const router = useRouter();
   const connect = useConnectPaymentGateway(projectId);
   const [report, setReport] = useState<ValidationReport | null>(null);
@@ -79,8 +77,8 @@ export function ConnectGatewayForm({
         </form>
       </Form>
 
-      {manual.map((m) => (
-        <Alert key={m.title}>
+      {manual.map((m, i) => (
+        <Alert key={`${m.title}-${i}`}>
           <AlertTitle>Manual step — {m.title}</AlertTitle>
           <AlertDescription>
             <ol className="list-decimal pl-5 text-sm space-y-1">
