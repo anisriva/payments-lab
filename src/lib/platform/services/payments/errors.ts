@@ -77,9 +77,8 @@ export class ActiveSubscriptionExistsError extends Error {
 
 export class PlatformSubscriptionExistsError extends Error {
   constructor(projectId: string) {
-    super('This project already has a live plan subscription.');
+    super(`Project : ${projectId} already has a live plan subscription.`);
     this.name = 'PlatformSubscriptionExistsError';
-    void projectId;
   }
 }
 
