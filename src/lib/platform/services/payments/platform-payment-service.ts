@@ -16,6 +16,7 @@ import {
   PLATFORM_RECEIVER_COUNTRY,
   SUBSCRIPTION_TOTAL_CYCLES,
   getPlatformProvider,
+  checkoutReturnUrl,
 } from '@/lib/common/services/payments/payment-config';
 import { getPaymentEnvironment } from '@/config/payments/env';
 import { getPlatformCredentials } from '@/config/payments/platform-credentials';
@@ -339,6 +340,11 @@ export class PlatformPaymentService {
         reference: { kind: 'platform_order', id: order.id },
         amount: { amountMinor: amount, currency: price.currencyCode },
         description: `${credits} AI credits`,
+        returnUrl: checkoutReturnUrl({
+          recordUrl: `/api/platform/payments/credit-purchases/${order.id}`,
+          back: `/platform/checkout/${provider}`,
+          provider,
+        }),
         context: { sku: 'ai_credits' },
       });
     } catch (e) {
@@ -349,8 +355,10 @@ export class PlatformPaymentService {
       throw e;
     }
 
-    // 7. Save provider ref and return
-    await this.orderDAO.update(order.id, { providerOrderId: checkout.providerRef });
+    // 7. Save provider ref and return (one-time checkouts always return one)
+    if (checkout.providerRef) {
+      await this.orderDAO.update(order.id, { providerOrderId: checkout.providerRef });
+    }
     return { recordId: order.id, provider, selectionReason, instruction: checkout.instruction };
   }
 
@@ -438,6 +446,11 @@ export class PlatformPaymentService {
         planRef,
         totalCycles: SUBSCRIPTION_TOTAL_CYCLES[planPrice.billingMode],
         description: planPrice.plan.name,
+        returnUrl: checkoutReturnUrl({
+          recordUrl: `/api/platform/payments/subscriptions/${subscription.id}`,
+          back: `/platform/checkout/${provider}`,
+          provider,
+        }),
       });
     } catch (e) {
       await this.subscriptionDAO.update(subscription.id, {
@@ -447,8 +460,10 @@ export class PlatformPaymentService {
       throw e;
     }
 
-    // 6. Save provider ref and return
-    await this.subscriptionDAO.update(subscription.id, { providerSubscriptionId: checkout.providerRef });
+    // 6. Save provider ref and return (may be omitted — adopted from the first success event instead)
+    if (checkout.providerRef) {
+      await this.subscriptionDAO.update(subscription.id, { providerSubscriptionId: checkout.providerRef });
+    }
     return { recordId: subscription.id, provider, selectionReason, instruction: checkout.instruction };
   }
 
@@ -596,6 +611,15 @@ export class PlatformPaymentService {
             : null;
         if (!subscription) return 'no matching subscription';
 
+        if (event.subscriptionRef && subscription.providerSubscriptionId && subscription.providerSubscriptionId !== event.subscriptionRef) {
+          return `subscription ${subscription.id} ignored: event for another provider subscription (${event.subscriptionRef})`;
+        }
+        const adoptRef = subscription.providerSubscriptionId == null;
+        if (adoptRef && !(event.subscriptionRef && (event.type === 'subscription.activated' || event.type === 'subscription.charged'))) {
+          return `subscription ${subscription.id} ignored: no successful attempt yet`;
+        }
+        const adoptedRef = adoptRef ? { providerSubscriptionId: event.subscriptionRef } : {};
+
         if (event.type === 'subscription.charged') {
           return this.prisma.$transaction(async (tx) => {
             const txSubscriptionDAO = new PlatformSubscriptionDAO(tx);
@@ -604,6 +628,7 @@ export class PlatformPaymentService {
               status: 'active',
               currentPeriodStart: event.subscriptionPeriod?.start,
               currentPeriodEnd: event.subscriptionPeriod?.end,
+              ...adoptedRef,
             });
             let note = `subscription ${subscription.id} charged`;
             if (event.paymentId && event.amount && !(await txPaymentDAO.findByProviderPaymentId(event.paymentId))) {
@@ -642,6 +667,7 @@ export class PlatformPaymentService {
           currentPeriodStart: event.subscriptionPeriod?.start,
           currentPeriodEnd: event.subscriptionPeriod?.end,
           canceledAt: newStatus === 'canceled' ? new Date() : undefined,
+          ...adoptedRef,
         });
         if (!moved) {
           const current = await this.subscriptionDAO.findById(subscription.id);

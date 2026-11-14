@@ -1,6 +1,6 @@
 import { createProvider } from '@/lib/common/payments/core/registry.server';
 import { getPlatformCredentials } from '@/config/payments/platform-credentials';
-import { getPaymentEnvironment } from '@/config/payments/env';
+import { getAppBaseUrl, getPaymentEnvironment } from '@/config/payments/env';
 import type { PaymentProvider } from '@/lib/common/payments/core/contracts/provider';
 import type { ProviderKey } from '@/lib/common/payments/core/contracts/provider';
 
@@ -19,6 +19,10 @@ export {
   getPaymentEnvironment,
 } from '@/config/payments/env';
 export { getPlatformCredentials } from '@/config/payments/platform-credentials';
+
+export function checkoutReturnUrl(input: { recordUrl: string; back: string; provider: ProviderKey }): string {
+  return `${getAppBaseUrl()}/checkout/return?url=${encodeURIComponent(input.recordUrl)}&back=${encodeURIComponent(input.back)}&provider=${input.provider}`;
+}
 
 /** Platform audience: credentials come from env, never stored. */
 export function getPlatformProvider(provider: ProviderKey): PaymentProvider {
