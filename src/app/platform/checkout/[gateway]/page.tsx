@@ -80,9 +80,9 @@ export default async function PlatformGatewayPage({
   const [planPrices, creditRate, purchases, subscriptions, payments] = await Promise.all([
     service.listPlanPricesForPayer(payer),
     service.getCreditRateForPayer(payer),
-    service.listCreditPurchases({ provider: gateway === 'auto' ? undefined : (gateway as 'razorpay' | 'dodo'), pagination: { page: ppage, limit: 10 } }),
-    service.listSubscriptions({ provider: gateway === 'auto' ? undefined : (gateway as 'razorpay' | 'dodo'), pagination: { page: spage, limit: 10 } }),
-    service.listPayments({ provider: gateway === 'auto' ? undefined : (gateway as 'razorpay' | 'dodo'), pagination: { page: paypage, limit: 10 } }),
+    service.listCreditPurchases({ provider: gateway === 'auto' ? undefined : (gateway as 'razorpay' | 'dodo'), projectId: payingProjectId, pagination: { page: ppage, limit: 10 } }),
+    service.listSubscriptions({ provider: gateway === 'auto' ? undefined : (gateway as 'razorpay' | 'dodo'), projectId: payingProjectId, pagination: { page: spage, limit: 10 } }),
+    service.listPayments({ provider: gateway === 'auto' ? undefined : (gateway as 'razorpay' | 'dodo'), projectId: payingProjectId, pagination: { page: paypage, limit: 10 } }),
   ]);
 
   return (

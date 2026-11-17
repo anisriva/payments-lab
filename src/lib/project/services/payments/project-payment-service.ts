@@ -19,6 +19,7 @@ import {
   LIVE_SUBSCRIPTION_STATUSES,
 } from '@/lib/common/services/payments/payment-transitions';
 import { SUBSCRIPTION_TOTAL_CYCLES } from '@/lib/common/services/payments/payment-constants';
+import { checkoutReturnUrl } from '@/lib/common/services/payments/payment-config';
 import { getPaymentEnvironment } from '@/config/payments/env';
 import { currencyAllowed } from '@/lib/common/payments/core/coverage';
 import { supports } from '@/lib/common/payments/core/contracts/features';
@@ -229,6 +230,11 @@ export class ProjectPaymentService {
         reference: { kind: 'project_order', id: order.id },
         amount: { amountMinor: unitAmount, currency: price.currencyCode },
         description: offering.name,
+        returnUrl: checkoutReturnUrl({
+          recordUrl: `/api/project/${projectId}/payments/orders/${order.id}`,
+          back: `/byop/projects/${projectId}/${connection.provider}/storefront`,
+          provider: connection.provider,
+        }),
         buyer: { email: input.buyerEmail },
         context: { projectId },
       });
@@ -236,7 +242,9 @@ export class ProjectPaymentService {
       await this.orderDAO.update(order.id, { status: 'failed', failureReason: e instanceof Error ? e.message : 'Unknown error' });
       throw e;
     }
-    await this.orderDAO.update(order.id, { providerOrderId: checkout.providerRef });
+    if (checkout.providerRef) {
+      await this.orderDAO.update(order.id, { providerOrderId: checkout.providerRef });
+    }
     return { recordId: order.id, provider: connection.provider, instruction: checkout.instruction };
   }
 
@@ -284,6 +292,11 @@ export class ProjectPaymentService {
         planRef,
         totalCycles: SUBSCRIPTION_TOTAL_CYCLES[price.billingMode!],
         description: offering.name,
+        returnUrl: checkoutReturnUrl({
+          recordUrl: `/api/project/${projectId}/payments/subscriptions/${subscription.id}`,
+          back: `/byop/projects/${projectId}/${connection.provider}/storefront`,
+          provider: connection.provider,
+        }),
         buyer: { email: input.buyerEmail },
         context: { projectId },
       });
@@ -291,7 +304,9 @@ export class ProjectPaymentService {
       await this.subscriptionDAO.update(subscription.id, { status: 'canceled', failureReason: e instanceof Error ? e.message : 'Unknown error' });
       throw e;
     }
-    await this.subscriptionDAO.update(subscription.id, { providerSubscriptionId: checkout.providerRef });
+    if (checkout.providerRef) {
+      await this.subscriptionDAO.update(subscription.id, { providerSubscriptionId: checkout.providerRef });
+    }
     return { recordId: subscription.id, provider: connection.provider, instruction: checkout.instruction };
   }
 
@@ -411,6 +426,15 @@ export class ProjectPaymentService {
             : null;
         if (!sub || sub.connectionId !== connectionId) return 'no matching subscription';
 
+        if (event.subscriptionRef && sub.providerSubscriptionId && sub.providerSubscriptionId !== event.subscriptionRef) {
+          return `subscription ${sub.id} ignored: event for another provider subscription (${event.subscriptionRef})`;
+        }
+        const adoptRef = sub.providerSubscriptionId == null;
+        if (adoptRef && !(event.subscriptionRef && (event.type === 'subscription.activated' || event.type === 'subscription.charged'))) {
+          return `subscription ${sub.id} ignored: no successful attempt yet`;
+        }
+        const adoptedRef = adoptRef ? { providerSubscriptionId: event.subscriptionRef } : {};
+
         if (event.type === 'subscription.charged') {
           return this.prisma.$transaction(async (tx) => {
             const txSubscriptionDAO = new ProjectSubscriptionDAO(tx);
@@ -419,6 +443,7 @@ export class ProjectPaymentService {
               status: 'active',
               currentPeriodStart: event.subscriptionPeriod?.start,
               currentPeriodEnd: event.subscriptionPeriod?.end,
+              ...adoptedRef,
             });
             let note = `subscription ${sub.id} charged`;
             if (event.paymentId && event.amount && !(await txPaymentDAO.findByProviderPaymentId(event.paymentId))) {
@@ -456,6 +481,7 @@ export class ProjectPaymentService {
           currentPeriodStart: event.subscriptionPeriod?.start,
           currentPeriodEnd: event.subscriptionPeriod?.end,
           canceledAt: to === 'canceled' ? new Date() : undefined,
+          ...adoptedRef,
         });
         if (!moved) {
           const current = await this.subscriptionDAO.findById(sub.id);

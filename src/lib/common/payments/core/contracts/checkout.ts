@@ -6,7 +6,7 @@ export type CheckoutInstruction =
   | { kind: 'embedded'; options: Record<string, unknown> };
 
 export interface CheckoutStart {
-  providerRef: string;
+  providerRef?: string;          // omitted when the provider's id only exists after payment; services adopt it from the first success event matched by our reference
   instruction: CheckoutInstruction;
 }
 

@@ -7,6 +7,10 @@ import { RAZORPAY_MANIFEST } from './adapters/razorpay/manifest';
 import { RAZORPAY_CREDENTIALS } from './adapters/razorpay/credentials';
 import { RAZORPAY_CLIENT } from './adapters/razorpay/client';
 import RAZORPAY_ONBOARDING_MD from './adapters/razorpay/onboarding.md';
+import { DODO_MANIFEST } from './adapters/dodo/manifest';
+import { DODO_CREDENTIALS } from './adapters/dodo/credentials';
+import { DODO_CLIENT } from './adapters/dodo/client';
+import DODO_ONBOARDING_MD from './adapters/dodo/onboarding.md';
 
 export interface ClientAdapter {
   manifest: ProviderManifest;
@@ -17,6 +21,7 @@ export interface ClientAdapter {
 
 const CLIENT_ADAPTERS: ClientAdapter[] = [
   { manifest: RAZORPAY_MANIFEST, credentials: RAZORPAY_CREDENTIALS, client: RAZORPAY_CLIENT, onboarding: RAZORPAY_ONBOARDING_MD },
+  { manifest: DODO_MANIFEST, credentials: DODO_CREDENTIALS, client: DODO_CLIENT, onboarding: DODO_ONBOARDING_MD },
 ];
 
 export function isProviderKey(value: string): value is ProviderKey {

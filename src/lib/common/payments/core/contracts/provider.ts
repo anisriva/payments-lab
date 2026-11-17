@@ -41,6 +41,7 @@ export interface OneTimeCheckoutInput {
   reference: PaymentReference;   // required — see Payment References
   amount: Money;
   description: string;
+  returnUrl: string;             // absolute URL of our return page — redirect checkouts send the buyer back here; modal providers ignore it
   buyer?: { email?: string; name?: string };
   discount?: { code: string };   // only when discount.apply is supported
   context?: PaymentContext;      // descriptive metadata only — never used for matching
@@ -57,6 +58,7 @@ export interface SubscriptionCheckoutInput {
   planRef: string;               // the provider-side plan object (createSubscriptionPlan)
   totalCycles: number;
   description: string;
+  returnUrl: string;             // absolute URL of our return page — redirect checkouts send the buyer back here; modal providers ignore it
   buyer?: { email?: string; name?: string };
   discount?: { code: string };
   context?: PaymentContext;

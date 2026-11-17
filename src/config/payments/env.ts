@@ -8,6 +8,8 @@ const paymentsEnvSchema = z.object({
   RAZORPAY_KEY_ID: z.string().startsWith('rzp_'),
   RAZORPAY_KEY_SECRET: z.string().min(1),
   RAZORPAY_WEBHOOK_SECRET: z.string().min(16),
+  DODO_API_KEY: z.string().startsWith('dodo_').optional(),
+  DODO_WEBHOOK_SECRET: z.string().startsWith('whsec_').optional(),
 });
 
 export type PaymentsEnv = z.infer<typeof paymentsEnvSchema>;
