@@ -1,4 +1,4 @@
-// DRAFT — Dodo Payments discovery pass 1 (2026-11-14). Review against docs/specs/IMPL-DODO.md §1.1.
+// Dodo Payments credentials — IMPL-DODO §1.1.
 import { z } from 'zod';
 import { defineCredentials } from '../../contracts/credentials';
 

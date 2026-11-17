@@ -1,5 +1,5 @@
-// REVIEWED DRAFT — Dodo Payments pass 2 (2026-11-14). Final verdicts in docs/specs/IMPL-DODO.md §1.3.
-// Windsurf: start with only credentials.verify, webhook.verify and webhook.* true; flip the rest in the step that implements them (§2).
+// Dodo Payments — registered 2026-11-14 (IMPL-DODO §2, Step 2).
+// A feature flips to supported: true only in the step that implements it.
 import { defineManifest } from '../../contracts/manifest';
 
 const OFF = { supported: false } as const;
@@ -11,13 +11,13 @@ export const DODO_MANIFEST = defineManifest({
   features: {
     'credentials.verify': { supported: true },            // GET /products (list_products_handler)
     'webhook.verify': { supported: true },                // Standard Webhooks headers, HMAC-SHA256
-    'checkout.one_time': { supported: true },             // POST /checkouts (create_session) with a one-time product
-    'checkout.custom_amount': { supported: true },        // product_cart[].amount on a pay_what_you_want product — amounts below the product price → 422 (E4)
+    'checkout.one_time': OFF,                             // Step 3 — POST /checkouts (create_session)
+    'checkout.custom_amount': OFF,                        // Step 3 — product_cart[].amount on a pay_what_you_want product
     'checkout.client_confirmation': OFF,                  // return URL params (payment_id, status) are unsigned
-    'payment.read': { supported: true },                  // GET /checkouts/{id} → payment_id + payment_status (E2.3)
-    'subscription_plan.create': { supported: true },      // POST /products with recurring_price
-    'subscription_plan.update': { supported: true },      // PATCH /products/{id} — name (our updateSubscriptionPlan only renames/activates)
-    'subscription_plan.disable': { supported: true },     // DELETE /products/{id} = archive (reversible: POST /products/{id}/unarchive)
+    'payment.read': OFF,                                  // Step 3 — GET /checkouts/{id} → payment_id + payment_status
+    'subscription_plan.create': OFF,                      // Step 4 — POST /products with recurring_price
+    'subscription_plan.update': OFF,                      // Step 4 — PATCH /products/{id}
+    'subscription_plan.disable': OFF,                     // Step 4 — DELETE /products/{id} = archive
     'subscription_plan.delete': {
       supported: false,
       manual: {
@@ -25,10 +25,10 @@ export const DODO_MANIFEST = defineManifest({
         steps: ['Dodo archives products instead of deleting them. Folio stops offering the plan; the archived product stays in your Dodo dashboard.'],
       },
     },
-    'subscription.create': { supported: true },           // POST /checkouts with a recurring product
-    'subscription.read': { supported: true },             // GET /subscriptions/{subscription_id}
-    'subscription.cancel': { supported: true },           // PATCH /subscriptions/{id} { status: 'cancelled' }
-    'subscription.cancel_at_period_end': { supported: true }, // PATCH /subscriptions/{id} { cancel_at_next_billing_date: true }
+    'subscription.create': OFF,                           // Step 4 — POST /checkouts with a recurring product
+    'subscription.read': OFF,                             // Step 4 — GET /subscriptions/{subscription_id}
+    'subscription.cancel': OFF,                           // Step 4 — PATCH /subscriptions/{id} { status: 'cancelled' }
+    'subscription.cancel_at_period_end': OFF,             // Step 4 — PATCH /subscriptions/{id} { cancel_at_next_billing_date: true }
     'refund.create': OFF,                                 // POST /refunds exists — not researched (no flow uses refunds yet)
     'refund.read': OFF,                                   // GET /refunds/{id} exists — not researched
     'discount.create': OFF,                               // POST /discounts exists — not researched

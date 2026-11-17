@@ -8,6 +8,9 @@ import { ProviderNotImplementedError } from './errors';
 import { RAZORPAY_MANIFEST } from './adapters/razorpay/manifest';
 import { RAZORPAY_CREDENTIALS } from './adapters/razorpay/credentials';
 import { RazorpayProvider } from './adapters/razorpay/provider';
+import { DODO_MANIFEST } from './adapters/dodo/manifest';
+import { DODO_CREDENTIALS } from './adapters/dodo/credentials';
+import { DodoProvider } from './adapters/dodo/provider';
 
 type ProviderClass = new (credentials: unknown, environment: PaymentEnvironment) => PaymentProvider;
 
@@ -65,7 +68,7 @@ const registrySchema = z.array(registryEntrySchema).superRefine((entries, ctx) =
 
 const ADAPTERS = registrySchema.parse([
   { manifest: RAZORPAY_MANIFEST, credentials: RAZORPAY_CREDENTIALS, providerClass: RazorpayProvider },
-  // + one line per provider
+  { manifest: DODO_MANIFEST, credentials: DODO_CREDENTIALS, providerClass: DodoProvider },
 ]);
 
 export function isProviderKey(value: string): value is ProviderKey {

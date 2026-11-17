@@ -10,7 +10,10 @@ const ENV_VARS: Record<ProviderKey, Record<string, string>> = {
     keySecret: 'RAZORPAY_KEY_SECRET',
     webhookSecret: 'RAZORPAY_WEBHOOK_SECRET',
   },
-  dodo: {},
+  dodo: {
+    apiKey: 'DODO_API_KEY',
+    webhookSecret: 'DODO_WEBHOOK_SECRET',
+  },
   stripe: {},
   paypal: {},
 };
